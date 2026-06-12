@@ -11,6 +11,12 @@ permissions:
   contents: write # create the version tag + GitHub release
   packages: write # push to ghcr
 
+# Serialize release runs: two pushes in quick succession must not race on the
+# :latest tag or the tag/release creation.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 env:
   IMAGE_NAME: glidemap
 
@@ -24,7 +30,13 @@ jobs:
 
       - name: Read version from package.json
         id: version
-        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if ! echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+].+)?$'; then
+            echo "::error::package.json version \"$version\" is not a valid semver string."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       # Block re-releasing a version with different code, but allow re-running
       # a failed workflow for the same commit so a partial release (e.g. image
@@ -39,6 +51,18 @@ jobs:
               exit 1
             fi
             echo "$tag already points at this commit; continuing as a re-run."
+          fi
+
+      # Claim the version tag before any artifact is published. This makes the
+      # uniqueness guard authoritative from the start of the run: a later push
+      # of a different commit with the same version is blocked even if this
+      # run's image push or release step failed midway.
+      - name: Create version tag
+        run: |
+          tag="v${{ steps.version.outputs.version }}"
+          if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            git tag "$tag" "$GITHUB_SHA"
+            git push origin "$tag"
           fi
 
       - name: Resolve image name
@@ -70,7 +94,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Create tag and GitHub release
+      - name: Create GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -80,6 +104,5 @@ jobs:
             exit 0
           fi
           gh release create "$tag" \
-            --target "$GITHUB_SHA" \
             --title "Glidemap $tag" \
             --generate-notes

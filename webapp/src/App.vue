@@ -10,7 +10,7 @@ import LandingPage from "./components/LandingPage.vue";
 import HelpModal from "./components/HelpModal.vue";
 import AppTour, { type TourStep } from "./components/AppTour.vue";
 import BrandMark from "./components/BrandMark.vue";
-import { branding } from "../../branding.js";
+import { branding, creditJoiner } from "../../branding.js";
 import type {
   CameraConfig,
   FormCamera,
@@ -775,7 +775,7 @@ onBeforeUnmount(() => {
               <p class="info-credits-label">Built by</p>
               <p class="info-credits">
                 <template v-for="(credit, index) in branding.builtBy" :key="credit.name">
-                  <template v-if="index > 0">{{ index === branding.builtBy.length - 1 ? ", and " : ", " }}</template>
+                  <template v-if="index > 0">{{ creditJoiner(index, branding.builtBy.length) }}</template>
                   <a v-if="credit.url" :href="credit.url" target="_blank" rel="noreferrer">{{ credit.name }}</a>
                   <template v-else>{{ credit.name }}</template>
                 </template>

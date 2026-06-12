@@ -13,8 +13,9 @@ permissions:
 
 jobs:
   review:
-    # Skip drafts; review once the author marks the PR ready
-    if: ${{ !github.event.pull_request.draft }}
+    # Skip drafts, and skip fork PRs (secrets are unavailable there — the
+    # review step would fail with an empty API key instead of reviewing).
+    if: ${{ !github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

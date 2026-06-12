@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 
 export interface TourStep {
   target: string;
@@ -14,7 +14,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: "close", completed: boolean): void;
+  (e: "close"): void;
   (e: "change", index: number): void;
 }>();
 
@@ -27,34 +27,50 @@ interface SpotlightRect {
 
 const index = ref(0);
 const spotlight = ref<SpotlightRect | null>(null);
+const cardRef = ref<HTMLDivElement | null>(null);
+const viewport = ref({ width: window.innerWidth, height: window.innerHeight });
 const currentStep = computed(() => props.steps[index.value] ?? null);
 const isLast = computed(() => index.value >= props.steps.length - 1);
 
 const CARD_WIDTH = 320;
-const CARD_HEIGHT = 190;
 const GAP = 12;
 
+// Measured after each render; the fallback only applies before first measure.
+const cardHeight = ref(190);
+
 const cardStyle = computed<Record<string, string>>(() => {
-  const viewportWidth = window.innerWidth;
-  const viewportHeight = window.innerHeight;
+  const { width: viewportWidth, height: viewportHeight } = viewport.value;
   const rect = spotlight.value;
   if (!rect) {
     return {
-      top: `${Math.round(viewportHeight / 2 - CARD_HEIGHT / 2)}px`,
+      top: `${Math.round(viewportHeight / 2 - cardHeight.value / 2)}px`,
       left: `${Math.round(viewportWidth / 2 - CARD_WIDTH / 2)}px`
     };
   }
 
   const left = Math.min(Math.max(rect.left, GAP), viewportWidth - CARD_WIDTH - GAP);
   let top = rect.top + rect.height + GAP;
-  if (top + CARD_HEIGHT > viewportHeight - GAP) {
-    top = rect.top - CARD_HEIGHT - GAP;
+  if (top + cardHeight.value > viewportHeight - GAP) {
+    top = rect.top - cardHeight.value - GAP;
   }
   if (top < GAP) {
-    top = Math.round(viewportHeight / 2 - CARD_HEIGHT / 2);
+    top = Math.round(viewportHeight / 2 - cardHeight.value / 2);
   }
   return { top: `${Math.round(top)}px`, left: `${Math.round(left)}px` };
 });
+
+// Read the card's real height (content-driven) and move keyboard focus into
+// the dialog so tabbing doesn't land in the obscured page behind it.
+async function syncCard(): Promise<void> {
+  await nextTick();
+  const card = cardRef.value;
+  if (!card) return;
+  const measured = card.getBoundingClientRect().height;
+  if (measured > 0) {
+    cardHeight.value = measured;
+  }
+  card.focus();
+}
 
 function measure(): void {
   const step = currentStep.value;
@@ -87,20 +103,26 @@ watch(
   () => props.open,
   (open) => {
     if (!open) return;
-    index.value = 0;
+    if (index.value !== 0) {
+      // The index watcher emits and measures; doing it here too would double-fire.
+      index.value = 0;
+      return;
+    }
     emit("change", 0);
     scheduleMeasure();
+    void syncCard();
   }
 );
 
 watch(index, (value) => {
   emit("change", value);
   scheduleMeasure();
+  void syncCard();
 });
 
 function next(): void {
   if (isLast.value) {
-    emit("close", true);
+    emit("close");
     return;
   }
   index.value += 1;
@@ -113,6 +135,7 @@ function back(): void {
 }
 
 function onResize(): void {
+  viewport.value = { width: window.innerWidth, height: window.innerHeight };
   if (props.open) measure();
 }
 
@@ -136,12 +159,12 @@ onBeforeUnmount(() => {
       }"
     />
     <div v-else class="tour-backdrop" />
-    <div class="tour-card" role="dialog" aria-modal="true" :aria-label="`Tour step ${index + 1} of ${steps.length}`" :style="cardStyle">
+    <div ref="cardRef" class="tour-card" role="dialog" aria-modal="true" tabindex="-1" :aria-label="`Tour step ${index + 1} of ${steps.length}`" :style="cardStyle">
       <div class="tour-progress">{{ index + 1 }} / {{ steps.length }}</div>
       <h3>{{ currentStep.title }}</h3>
       <p>{{ currentStep.body }}</p>
       <div class="tour-actions">
-        <button type="button" class="btn btn-sm" @click="emit('close', false)">Skip</button>
+        <button type="button" class="btn btn-sm" @click="emit('close')">Skip</button>
         <div class="tour-actions-right">
           <button v-if="index > 0" type="button" class="btn btn-sm" @click="back">Back</button>
           <button type="button" class="btn btn-sm btn-primary" @click="next">{{ isLast ? "Done" : "Next" }}</button>

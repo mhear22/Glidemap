@@ -16,6 +16,14 @@ export interface Credit {
   url?: string;
 }
 
+// Separator preceding credit `index` in a prose list: "A and B" for two
+// entries, "A, B, and C" beyond that.
+export function creditJoiner(index: number, total: number): string {
+  if (index === 0) return "";
+  if (total === 2) return " and ";
+  return index === total - 1 ? ", and " : ", ";
+}
+
 export const branding = {
   name: "Glidemap",
   tagline: "Turn a route into a map flyover video",

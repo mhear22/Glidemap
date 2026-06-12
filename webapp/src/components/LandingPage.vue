@@ -1,11 +1,35 @@
 <script setup lang="ts">
+import { onMounted, ref } from "vue";
 import BrandMark from "./BrandMark.vue";
-import { branding } from "../../../branding.js";
+import { branding, creditJoiner } from "../../../branding.js";
 
 const emit = defineEmits<{
   (e: "enter"): void;
   (e: "guide"): void;
 }>();
+
+const reelRef = ref<HTMLVideoElement | null>(null);
+const reelPaused = ref(false);
+
+// WCAG 2.2.2: looping motion must be pausable and respect reduced-motion.
+onMounted(() => {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches && reelRef.value) {
+    reelRef.value.pause();
+    reelPaused.value = true;
+  }
+});
+
+function toggleReel(): void {
+  const video = reelRef.value;
+  if (!video) return;
+  if (video.paused) {
+    void video.play();
+    reelPaused.value = false;
+  } else {
+    video.pause();
+    reelPaused.value = true;
+  }
+}
 
 const steps = [
   {
@@ -60,7 +84,11 @@ const features = [
       </section>
 
       <section class="landing-reel">
-        <video src="/about-reel.mp4" autoplay muted loop playsinline :aria-label="`Reel of ${branding.name} renders`" />
+        <video ref="reelRef" src="/about-reel.mp4" autoplay muted loop playsinline :aria-label="`Reel of ${branding.name} renders`" />
+        <button type="button" class="landing-reel-toggle" :aria-label="reelPaused ? 'Play reel' : 'Pause reel'" @click="toggleReel">
+          <svg v-if="reelPaused" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3" /></svg>
+          <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><rect x="5" y="3" width="4" height="18" /><rect x="15" y="3" width="4" height="18" /></svg>
+        </button>
         <p class="landing-reel-caption">
           Straight out of the renderer: a satellite walk through Melbourne, a custom avatar crossing London, a drive across Paris, and a Melbourne&ndash;Sydney flight arc.
         </p>
@@ -103,7 +131,7 @@ const features = [
       <span>
         Built by
         <template v-for="(credit, index) in branding.builtBy" :key="credit.name">
-          <template v-if="index > 0">{{ index === branding.builtBy.length - 1 ? ", and " : ", " }}</template>
+          <template v-if="index > 0">{{ creditJoiner(index, branding.builtBy.length) }}</template>
           <a v-if="credit.url" :href="credit.url" target="_blank" rel="noreferrer">{{ credit.name }}</a>
           <template v-else>{{ credit.name }}</template>
         </template>

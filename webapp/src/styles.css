@@ -2035,3 +2035,26 @@ a:hover {
   color: var(--text-tertiary);
   font-variant-numeric: tabular-nums;
 }
+
+.landing-reel {
+  position: relative;
+}
+
+.landing-reel-toggle {
+  position: absolute;
+  right: 10px;
+  bottom: 38px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.landing-reel-toggle:hover {
+  background: rgba(0, 0, 0, 0.75);
+}
