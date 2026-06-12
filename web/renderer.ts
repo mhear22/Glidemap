@@ -472,16 +472,25 @@ async function waitForIdle(timeoutMs = 10000): Promise<void> {
   const map = requireMap();
   const deadline = performance.now() + timeoutMs;
 
+  // Let the render loop process any pending camera change first: jumpTo only
+  // requests newly-exposed tiles on the next render pass, so a synchronous
+  // areTilesLoaded() check would pass against the pre-move tile set.
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+  let waited = false;
   while (!(map.loaded() && map.areTilesLoaded())) {
     const remaining = deadline - performance.now();
     if (remaining <= 0) {
       break;
     }
 
+    waited = true;
     await waitForMapEvent("idle", Math.min(remaining, 1000));
   }
 
-  await sleep(120);
+  if (waited) {
+    await sleep(120);
+  }
 }
 
 async function waitForStyleLoad(timeoutMs = 2500): Promise<void> {
@@ -749,17 +758,183 @@ async function setScene(scene: PreparedRoute): Promise<void> {
     pitch: 0
   });
 
+  // In the embedded preview, warm the full animation's tiles in the
+  // background so scrubbing and playback never hit cold tiles. The render
+  // path skips this and awaits the same prefetch inside primeTiles instead.
+  if (window.parent && window.parent !== window) {
+    void prefetchSceneTiles().catch((error: unknown) => {
+      console.warn("Tile prefetch failed", error);
+    });
+  }
+
   await waitForIdle();
 }
 
-// Prime along the actual animation path so frame capture rarely has to wait.
-// renderFrame uses the exact camera math, so the tiles it loads here are the
-// tiles each captured frame will need.
+// --- Tile prefetch ---
+//
+// MapLibre never retries a tile that failed to load, and a frame captured
+// while a tile is missing bakes the hole into the MP4. So before rendering
+// (and in the background for previews) we enumerate every tile the whole
+// animation will need — same camera math as renderFrame — and fetch them
+// with retries. That lands them in the server's disk cache (and the service
+// worker / HTTP cache), so the map itself never sees a slow or failed tile.
+
+const MIN_TILE_Z = 0;
+const MAX_TILE_Z = 19;
+const PREFETCH_CONCURRENCY = 12;
+const PREFETCH_ATTEMPTS = 3;
+
+let prefetchVersion = 0;
+const prefetchedTileUrls = new Set<string>();
+
+function mercatorYFraction(lat: number): number {
+  const clamped = clamp(lat, -85.051129, 85.051129);
+  const rad = (clamped * Math.PI) / 180;
+  return 0.5 - Math.log(Math.tan(Math.PI / 4 + rad / 2)) / (2 * Math.PI);
+}
+
+function collectViewTiles(
+  target: Set<string>,
+  center: [number, number],
+  zoom: number,
+  widthPx: number,
+  heightPx: number
+): void {
+  const worldSize = 512 * Math.pow(2, zoom);
+  const centerX = (center[0] + 180) / 360;
+  const centerY = mercatorYFraction(center[1]);
+  const halfWidth = widthPx / 2 / worldSize;
+  const halfHeight = heightPx / 2 / worldSize;
+
+  // 256px raster tiles render one zoom level deeper than the map zoom; cover
+  // both integer levels around it so MapLibre's rounding can't miss.
+  const tileZooms = new Set([
+    clamp(Math.floor(zoom + 1), MIN_TILE_Z, MAX_TILE_Z),
+    clamp(Math.ceil(zoom + 1), MIN_TILE_Z, MAX_TILE_Z)
+  ]);
+
+  for (const tileZ of tileZooms) {
+    const tileCount = Math.pow(2, tileZ);
+    const pad = 1;
+    const minX = Math.max(0, Math.floor((centerX - halfWidth) * tileCount) - pad);
+    const maxX = Math.min(tileCount - 1, Math.floor((centerX + halfWidth) * tileCount) + pad);
+    const minY = Math.max(0, Math.floor((centerY - halfHeight) * tileCount) - pad);
+    const maxY = Math.min(tileCount - 1, Math.floor((centerY + halfHeight) * tileCount) + pad);
+    for (let x = minX; x <= maxX; x += 1) {
+      for (let y = minY; y <= maxY; y += 1) {
+        target.add(`${tileZ}/${x}/${y}`);
+      }
+    }
+  }
+}
+
+function collectSceneTileUrls(): string[] {
+  const scene = state.scene;
+  const cameras = state.cameras;
+  const map = state.map;
+  if (!scene || !cameras || !map) {
+    return [];
+  }
+
+  // Cover both the configured render size and the live canvas, whichever is
+  // larger, so the same prefetch serves the preview and the export.
+  const container = map.getContainer();
+  const width = Math.max(Number(scene.width ?? 0), container.clientWidth || 0, 1280);
+  const height = Math.max(Number(scene.height ?? 0), container.clientHeight || 0, 720);
+
+  const fps = Number(scene.fps ?? 30);
+  const durationSeconds = Number(scene.durationSeconds ?? 8);
+  const totalFrames = Math.max(2, Math.round(fps * durationSeconds));
+  const sampleCount = Math.min(totalFrames, 120);
+
+  const coords = new Set<string>();
+  for (let index = 0; index < sampleCount; index += 1) {
+    const camera = cameraForProgress(cameras, index / (sampleCount - 1));
+    collectViewTiles(coords, camera.center, camera.zoom, width, height);
+  }
+
+  const provider = state.mapType ?? "satellite";
+  return [...coords].map((coord) => `/tiles/${provider}/${coord}`);
+}
+
+async function prefetchSceneTiles(): Promise<void> {
+  const version = ++prefetchVersion;
+  const urls = collectSceneTileUrls().filter((url) => !prefetchedTileUrls.has(url));
+  if (!urls.length) {
+    return;
+  }
+
+  let nextIndex = 0;
+  let failures = 0;
+
+  async function fetchWorker(): Promise<void> {
+    while (nextIndex < urls.length && version === prefetchVersion) {
+      const url = urls[nextIndex];
+      nextIndex += 1;
+      if (!url) {
+        continue;
+      }
+      let fetched = false;
+      for (let attempt = 0; attempt < PREFETCH_ATTEMPTS && !fetched; attempt += 1) {
+        if (attempt > 0) {
+          await sleep(300 * attempt);
+        }
+        try {
+          const response = await fetch(url);
+          if (response.ok) {
+            // Consume the body so the HTTP cache stores the tile.
+            await response.arrayBuffer();
+            prefetchedTileUrls.add(url);
+            fetched = true;
+          }
+        } catch {
+          // retry
+        }
+      }
+      if (!fetched) {
+        failures += 1;
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: PREFETCH_CONCURRENCY }, fetchWorker));
+
+  if (failures > 0) {
+    console.warn(`Tile prefetch finished with ${failures} of ${urls.length} tiles unavailable`);
+  }
+}
+
+// Render path: block until every tile the animation needs is cached, then do
+// a quick pass along the path so the keyframes are already in map memory.
 async function primeTiles(): Promise<void> {
+  await prefetchSceneTiles();
   const primeSamples = 9;
   for (let index = 0; index < primeSamples; index += 1) {
     await renderFrame(index / (primeSamples - 1));
   }
+}
+
+function cameraForProgress(
+  cameras: CameraState,
+  progress: number
+): { center: [number, number]; zoom: number; pathProgress: number } {
+  const holdIn = 0.08;
+  const holdOut = 0.08;
+  const mapped = clamp((progress - holdIn) / (1 - holdIn - holdOut), 0, 1);
+  const eased = sampleTimingEasing(mapped, cameras.timingCurve / 100, cameras.timingInverted);
+  const pathProgress = 0.5 - 0.5 * Math.cos(eased * Math.PI);
+  const center = samplePath(cameras.cameraPath, pathProgress);
+
+  const halfProgress = 1 - Math.abs(mapped - 0.5) * 2;
+  const rawBlend = sampleMirroredBlend(halfProgress, cameras.aggressiveness);
+  const taperPower = 2.5;
+  const zoomBlend = 1 - Math.pow(1 - rawBlend, taperPower);
+  const zoom =
+    mapped <= 0.5
+      ? lerp(cameras.start.zoom, cameras.overview.zoom, zoomBlend)
+      : lerp(cameras.overview.zoom, cameras.end.zoom, 1 - zoomBlend);
+
+  return { center, zoom, pathProgress };
 }
 
 async function renderFrame(progress: number): Promise<void> {
@@ -769,25 +944,11 @@ async function renderFrame(progress: number): Promise<void> {
     state.lastProgress = progress;
     return;
   }
-  const holdIn = 0.08;
-  const holdOut = 0.08;
-  const mapped = clamp((progress - holdIn) / (1 - holdIn - holdOut), 0, 1);
-  const eased = sampleTimingEasing(mapped, cameras.timingCurve / 100, cameras.timingInverted);
-  const pathProgress = 0.5 - 0.5 * Math.cos(eased * Math.PI);
-  const pathCenter = samplePath(cameras.cameraPath, pathProgress);
-
-  const halfProgress = 1 - Math.abs(mapped - 0.5) * 2;
-  const rawBlend = sampleMirroredBlend(halfProgress, cameras.aggressiveness);
-  const taperPower = 2.5;
-  const zoomBlend = 1 - Math.pow(1 - rawBlend, taperPower);
-  const zoomValue =
-    mapped <= 0.5
-      ? lerp(cameras.start.zoom, cameras.overview.zoom, zoomBlend)
-      : lerp(cameras.overview.zoom, cameras.end.zoom, 1 - zoomBlend);
+  const { center, zoom, pathProgress } = cameraForProgress(cameras, progress);
 
   map.jumpTo({
-    center: pathCenter,
-    zoom: zoomValue,
+    center,
+    zoom,
     bearing: 0,
     pitch: 0
   });
@@ -822,9 +983,9 @@ async function renderFrame(progress: number): Promise<void> {
 
   // Never hand a frame back while tiles in view are still loading — captured
   // frames are permanent, so a blank tile here means a blank tile in the MP4.
-  if (!map.areTilesLoaded()) {
-    await waitForIdle(8000);
-  }
+  // The leading rAF inside waitForIdle lets the render loop issue requests
+  // for tiles the jump just exposed before coverage is checked.
+  await waitForIdle(8000);
 
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   state.lastProgress = progress;
