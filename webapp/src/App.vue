@@ -5,6 +5,7 @@ import TimingCurveEditor from "./components/TimingCurveEditor.vue";
 import RenderPreview from "./components/RenderPreview.vue";
 import SearchField from "./components/SearchField.vue";
 import LocationSearchModal from "./components/LocationSearchModal.vue";
+import QueuePanel from "./components/QueuePanel.vue";
 import type {
   CameraConfig,
   FormCamera,
@@ -93,6 +94,32 @@ function toRouteConfig(route: RouteFormData): RouteConfig {
   };
 }
 
+// Preview payload: everything the preview endpoint needs, but never the avatar
+// (a base64 avatar can be megabytes and prepareRoute ignores it). Reading only
+// these fields also keeps avatar edits from re-triggering the preview watcher.
+function toPreviewConfig(route: RouteFormData): RouteConfig {
+  const config: RouteConfig = {
+    id: route.id,
+    name: route.name,
+    provider: route.provider,
+    mode: route.mode,
+    mapType: route.mapType,
+    width: route.width,
+    height: route.height,
+    fps: route.fps,
+    durationSeconds: route.durationSeconds,
+    overviewPadding: route.overviewPadding,
+    output: route.output,
+    start: toLocationSpec(route.start),
+    end: toLocationSpec(route.end),
+    camera: { ...route.camera }
+  };
+  if (route.path) {
+    config.path = { ...route.path };
+  }
+  return config;
+}
+
 function normalizeLocationInput(location?: Partial<FormLocation> | RouteConfig["start"]): FormLocation {
   if (!location) {
     return { label: "", query: "", coords: null };
@@ -156,20 +183,57 @@ const searchState = reactive<SearchState>({
   endLoading: false
 });
 const avatarPreviewUrl = computed<string | null>(() => route.avatarUrl ?? null);
+const saveModalInput = ref<HTMLInputElement | null>(null);
+const queueWrapRef = ref<HTMLDivElement | null>(null);
+const infoWrapRef = ref<HTMLDivElement | null>(null);
+
+interface Toast {
+  id: number;
+  message: string;
+  type: "success" | "error" | "info";
+}
+
+const toasts = ref<Toast[]>([]);
+let toastId = 0;
+
+function notify(message: string, type: Toast["type"] = "info"): void {
+  const id = ++toastId;
+  toasts.value.push({ id, message, type });
+  window.setTimeout(() => {
+    toasts.value = toasts.value.filter((toast) => toast.id !== id);
+  }, type === "error" ? 6000 : 3500);
+}
+
+function dismissToast(id: number): void {
+  toasts.value = toasts.value.filter((toast) => toast.id !== id);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 function handleAvatarUpload(event: Event): void {
   const input = event.target as HTMLInputElement;
   const file = input.files?.[0];
   if (!file) return;
-  if (!file.type.match(/^image\/(png|jpeg|jpg|webp)$/)) return;
-  if (file.size > 2 * 1024 * 1024) return;
+  if (!file.type.match(/^image\/(png|jpeg|jpg|webp)$/)) {
+    notify("Avatar must be a PNG, JPG, or WebP image.", "error");
+    input.value = "";
+    return;
+  }
+  if (file.size > 2 * 1024 * 1024) {
+    notify("Avatar image must be 2 MB or smaller.", "error");
+    input.value = "";
+    return;
+  }
   const reader = new FileReader();
   reader.onload = () => { route.avatarUrl = reader.result as string; };
+  reader.onerror = () => { notify("Could not read the avatar image.", "error"); };
   reader.readAsDataURL(file);
 }
 
 function clearAvatar(): void {
-  route.avatarUrl = undefined;
+  delete route.avatarUrl;
 }
 
 function avatarPreviewRadius(shape?: string): string {
@@ -234,6 +298,20 @@ const previewStatus = computed<{ text: string; type: string }>(() => {
 
 const previewDistance = computed<string | null>(() => distanceLabel(previewRoute.value));
 
+// The renderer draws the avatar marker, so merge avatar settings into the
+// prepared scene locally rather than round-tripping them through the API.
+const previewScene = computed<PreparedRoute | null>(() => {
+  if (!previewRoute.value) return null;
+  if (!route.avatarUrl) return previewRoute.value;
+  const scene: PreparedRoute = { ...previewRoute.value, avatarUrl: route.avatarUrl };
+  if (route.avatarScale != null) scene.avatarScale = route.avatarScale;
+  if (route.avatarBorderWidth != null) scene.avatarBorderWidth = route.avatarBorderWidth;
+  if (route.avatarBorderColor != null) scene.avatarBorderColor = route.avatarBorderColor;
+  if (route.avatarBgColor != null) scene.avatarBgColor = route.avatarBgColor;
+  if (route.avatarShape != null) scene.avatarShape = route.avatarShape;
+  return scene;
+});
+
 function stopPlayback(): void {
   playing.value = false;
   cancelAnimationFrame(playRaf);
@@ -281,13 +359,21 @@ watch(activeJobCount, (count: number) => {
 });
 
 async function loadPresets(): Promise<void> {
-  const payload = await requestJson<{ presets: PresetItem[] }>("/api/presets");
-  presets.value = payload.presets;
+  try {
+    const payload = await requestJson<{ presets: PresetItem[] }>("/api/presets");
+    presets.value = payload.presets;
+  } catch (error) {
+    notify(`Could not load presets: ${errorMessage(error)}`, "error");
+  }
 }
 
 async function loadJobs(): Promise<void> {
-  const payload = await requestJson<RenderJobsResponse>("/api/render-jobs");
-  jobs.value = payload.jobs;
+  try {
+    const payload = await requestJson<RenderJobsResponse>("/api/render-jobs");
+    jobs.value = payload.jobs;
+  } catch (error) {
+    console.error(error);
+  }
 }
 
 function applyRoute(nextRoute: RouteApplyInput): void {
@@ -310,47 +396,65 @@ function openSaveModal(): void {
   saveModalName.value = presetName.value || route.name || "";
   saveModalOpen.value = true;
   nextTick(() => {
-    const input = document.querySelector<HTMLInputElement>(".modal .text-input");
-    if (input) input.focus();
+    saveModalInput.value?.focus();
   });
 }
 
 async function confirmSave(): Promise<void> {
   const name = saveModalName.value.trim() || route.name || "Route preset";
-  const payload = await requestJson<PresetDetail>("/api/presets", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, route: toRouteConfig(route) })
-  });
-  presetName.value = payload.name;
-  route.id = payload.route.id ?? route.id;
-  route.name = payload.route.name ?? route.name;
-  saveModalOpen.value = false;
+  try {
+    const payload = await requestJson<PresetDetail>("/api/presets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, route: toRouteConfig(route) })
+    });
+    presetName.value = payload.name;
+    route.id = payload.route.id ?? route.id;
+    route.name = payload.route.name ?? route.name;
+    saveModalOpen.value = false;
+    notify(`Preset "${payload.name}" saved.`, "success");
+  } catch (error) {
+    notify(`Could not save preset: ${errorMessage(error)}`, "error");
+    return;
+  }
   await loadPresets();
 }
 
 async function loadPreset(id: string): Promise<void> {
-  const payload = await requestJson<PresetDetail>(`/api/presets/${encodeURIComponent(id)}`);
-  applyRoute(payload.route);
-  presetName.value = payload.name ?? payload.route.name ?? "";
-  previewProgress.value = 0;
-  schedulePreview(0);
-  loadModalOpen.value = false;
+  try {
+    const payload = await requestJson<PresetDetail>(`/api/presets/${encodeURIComponent(id)}`);
+    applyRoute(payload.route);
+    presetName.value = payload.name ?? payload.route.name ?? "";
+    previewProgress.value = 0;
+    schedulePreview(0);
+    loadModalOpen.value = false;
+  } catch (error) {
+    notify(`Could not load preset: ${errorMessage(error)}`, "error");
+  }
 }
 
 async function queueRender(): Promise<void> {
   if (!canQueueRender.value) return;
-  await requestJson("/api/render-jobs", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ route: toRouteConfig(route) })
-  });
+  try {
+    await requestJson("/api/render-jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ route: toRouteConfig(route) })
+    });
+    notify("Render queued.", "success");
+  } catch (error) {
+    notify(`Could not queue render: ${errorMessage(error)}`, "error");
+  }
 }
 
 async function cancelRender(jobId: string): Promise<void> {
-  await requestJson(`/api/render-jobs/${encodeURIComponent(jobId)}`, {
-    method: "DELETE"
-  });
+  try {
+    await requestJson(`/api/render-jobs/${encodeURIComponent(jobId)}`, {
+      method: "DELETE"
+    });
+  } catch (error) {
+    notify(`Could not cancel render: ${errorMessage(error)}`, "error");
+  }
 }
 
 function resetRoute(): void {
@@ -423,39 +527,63 @@ function scheduleSearch(kind: "start" | "end", query: string): void {
   else endSearchTimer = handle;
 }
 
+let previewAbort: AbortController | null = null;
+let previewRequestVersion = 0;
+
 function schedulePreview(delayMs: number = 320): void {
   window.clearTimeout(previewTimer);
   previewTimer = window.setTimeout(async () => {
+    previewAbort?.abort();
     if (!previewReady.value) {
       previewRoute.value = null;
       previewError.value = "";
       previewLoading.value = false;
       return;
     }
-    const payload = toRouteConfig(route);
+    const payload = toPreviewConfig(route);
+    const version = ++previewRequestVersion;
+    const abort = new AbortController();
+    previewAbort = abort;
     previewLoading.value = true;
     previewError.value = "";
     try {
       const preview = await requestJson<PreviewResponse>("/api/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ route: payload })
+        body: JSON.stringify({ route: payload }),
+        signal: abort.signal
       });
+      if (version !== previewRequestVersion) return;
       previewRoute.value = preview.route;
     } catch (error: unknown) {
+      if (abort.signal.aborted || version !== previewRequestVersion) return;
       previewRoute.value = null;
-      previewError.value = error instanceof Error ? error.message : String(error);
+      previewError.value = errorMessage(error);
     } finally {
-      previewLoading.value = false;
+      if (version === previewRequestVersion) {
+        previewLoading.value = false;
+      }
     }
   }, delayMs);
 }
 
 watch(() => route.start.query, (query: string) => scheduleSearch("start", query));
 watch(() => route.end.query, (query: string) => scheduleSearch("end", query));
-watch(route, () => schedulePreview(), { deep: true, immediate: true });
+watch(() => toPreviewConfig(route), () => schedulePreview(), { deep: true, immediate: true });
 
 let clickOutsideHandler: ((e: MouseEvent) => void) | null = null;
+let escapeHandler: ((e: KeyboardEvent) => void) | null = null;
+
+function closeTopmostOverlay(): boolean {
+  if (searchModalOpen.value) { searchModalOpen.value = false; return true; }
+  if (avatarModalOpen.value) { avatarModalOpen.value = false; return true; }
+  if (resetModalOpen.value) { resetModalOpen.value = false; return true; }
+  if (loadModalOpen.value) { loadModalOpen.value = false; return true; }
+  if (saveModalOpen.value) { saveModalOpen.value = false; return true; }
+  if (queueOpen.value) { queueOpen.value = false; return true; }
+  if (infoOpen.value) { infoOpen.value = false; return true; }
+  return false;
+}
 
 onMounted(async () => {
   await Promise.all([loadPresets(), loadJobs()]);
@@ -470,16 +598,20 @@ onMounted(async () => {
   };
   document.addEventListener("visibilitychange", visibilityChangeHandler);
   clickOutsideHandler = (e) => {
-    const queueWrap = document.querySelector(".queue-trigger-wrap");
-    if (queueOpen.value && queueWrap && e.target instanceof Node && !queueWrap.contains(e.target)) {
+    if (queueOpen.value && queueWrapRef.value && e.target instanceof Node && !queueWrapRef.value.contains(e.target)) {
       queueOpen.value = false;
     }
-    const infoWrap = document.querySelector(".info-trigger-wrap");
-    if (infoOpen.value && infoWrap && e.target instanceof Node && !infoWrap.contains(e.target)) {
+    if (infoOpen.value && infoWrapRef.value && e.target instanceof Node && !infoWrapRef.value.contains(e.target)) {
       infoOpen.value = false;
     }
   };
   document.addEventListener("click", clickOutsideHandler);
+  escapeHandler = (e) => {
+    if (e.key === "Escape" && closeTopmostOverlay()) {
+      e.preventDefault();
+    }
+  };
+  document.addEventListener("keydown", escapeHandler);
 });
 
 onBeforeUnmount(() => {
@@ -488,9 +620,11 @@ onBeforeUnmount(() => {
   window.clearTimeout(previewTimer);
   window.clearInterval(pollTimer);
   cancelAnimationFrame(playRaf);
+  previewAbort?.abort();
   events?.close();
   if (visibilityChangeHandler) document.removeEventListener("visibilitychange", visibilityChangeHandler);
   if (clickOutsideHandler) document.removeEventListener("click", clickOutsideHandler);
+  if (escapeHandler) document.removeEventListener("keydown", escapeHandler);
 });
 </script>
 
@@ -507,12 +641,12 @@ onBeforeUnmount(() => {
         MapAnim
       </div>
       <div class="header-actions">
-        <button class="btn btn-sm theme-toggle" @click="darkMode = !darkMode" :title="darkMode ? 'Switch to light mode' : 'Switch to dark mode'">
+        <button class="btn btn-sm theme-toggle" @click="darkMode = !darkMode" :title="darkMode ? 'Switch to light mode' : 'Switch to dark mode'" :aria-label="darkMode ? 'Switch to light mode' : 'Switch to dark mode'">
           <svg v-if="darkMode" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
           <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
         </button>
-        <div class="info-trigger-wrap">
-          <button class="btn btn-sm info-toggle" @click="infoOpen = !infoOpen" :class="{ active: infoOpen }" title="About MapAnim">
+        <div ref="infoWrapRef" class="info-trigger-wrap">
+          <button class="btn btn-sm info-toggle" @click="infoOpen = !infoOpen" :class="{ active: infoOpen }" title="About MapAnim" aria-label="About MapAnim" :aria-expanded="infoOpen">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
           </button>
           <div v-if="infoOpen" class="info-dropdown" @click.stop>
@@ -525,65 +659,17 @@ onBeforeUnmount(() => {
             </div>
           </div>
         </div>
-        <div class="queue-trigger-wrap">
-          <button class="btn btn-sm queue-trigger" @click="toggleQueue" :class="{ active: queueOpen }" :title="`${jobs.length} render job${jobs.length === 1 ? '' : 's'}`">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <div ref="queueWrapRef" class="queue-trigger-wrap">
+          <button class="btn btn-sm queue-trigger" @click="toggleQueue" :class="{ active: queueOpen }" :title="`${jobs.length} render job${jobs.length === 1 ? '' : 's'}`" aria-label="Render queue" :aria-expanded="queueOpen">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
             </svg>
             <span v-if="activeJobCount" class="queue-blip">{{ activeJobCount }}</span>
           </button>
-          <div v-if="queueOpen" class="queue-dropdown" @click.stop>
-            <div class="queue-dropdown-header">
-              <span>Render Queue</span>
-              <span class="queue-count">{{ jobs.length }} job{{ jobs.length === 1 ? '' : 's' }}</span>
-            </div>
-            <div v-if="!jobs.length" class="queue-empty">No render jobs queued yet.</div>
-            <div v-else class="queue-dropdown-list">
-              <article
-                v-for="job in jobs"
-                :key="job.id"
-                class="queue-item"
-                :data-status="job.status"
-              >
-                <div class="queue-item-title">{{ job.summary?.name || (job.summary?.startLabel || 'Unknown') + ' → ' + (job.summary?.endLabel || 'Unknown') }}</div>
-                <div class="queue-item-route">{{ (job.summary?.startLabel || 'Unknown start') }} → {{ (job.summary?.endLabel || 'Unknown end') }}</div>
-                <div class="queue-item-row">
-                  <span>{{ job.summary?.mode || "walking" }} · {{ job.summary?.mapType || "satellite" }}</span>
-                  <span class="queue-status-badge" :class="job.status || 'pending'">{{ job.status }}</span>
-                </div>
-                <div class="queue-item-row">
-                  <span>{{ job.stage }}</span>
-                  <span>{{ job.progress ? (job.progress.frame != null ? `${job.progress.frame}/${job.progress.totalFrames ?? 0} frames` : typeof job.progress.percent === 'number' ? `${Math.round(job.progress.percent)}%` : job.stage) : job.stage }}</span>
-                </div>
-                <div v-if="typeof job.progress?.percent === 'number'" class="queue-bar">
-                  <div class="queue-bar-fill" :style="{ width: `${Math.max(4, job.progress.percent)}%` }" />
-                </div>
-                <div v-if="job.error" class="queue-error">{{ job.error }}</div>
-                <div class="queue-item-actions">
-                  <button
-                    v-if="job.status === 'queued' || job.status === 'running'"
-                    type="button"
-                    class="queue-cancel-btn"
-                    title="Cancel render"
-                    @click="cancelRender(job.id)"
-                  >&times;</button>
-                  <a
-                  v-if="job.result?.outputUrl"
-                  class="queue-link"
-                  :href="job.result.outputUrl"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
-                  Open MP4
-                </a>
-                </div>
-              </article>
-            </div>
-          </div>
+          <QueuePanel v-if="queueOpen" :jobs="jobs" @cancel="cancelRender" />
         </div>
-        <button class="btn btn-sm" @click="toggleSidebar" :class="{ 'sidebar-toggle': true }">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <button class="btn btn-sm sidebar-toggle" @click="toggleSidebar" aria-label="Toggle settings sidebar" :aria-expanded="sidebarOpen">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <line x1="3" y1="12" x2="21" y2="12" />
             <line x1="3" y1="6" x2="21" y2="6" />
             <line x1="3" y1="18" x2="21" y2="18" />
@@ -733,7 +819,7 @@ onBeforeUnmount(() => {
 
     <!-- Main workspace -->
     <main class="workspace">
-      <RenderPreview :route="previewRoute" :progress="previewProgress" />
+      <RenderPreview :route="previewScene" :progress="previewProgress" />
 
       <!-- Overlay controls on top of preview -->
       <div class="preview-overlay">
@@ -774,7 +860,7 @@ onBeforeUnmount(() => {
                 <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="5" y="3" width="4" height="18" /><rect x="15" y="3" width="4" height="18" /></svg>
               </button>
             </div>
-            <input id="preview-progress" v-model.number="previewProgress" type="range" min="0" max="1" step="0.01" @input="stopPlayback" />
+            <input id="preview-progress" v-model.number="previewProgress" type="range" min="0" max="1" step="0.01" aria-label="Preview position" @input="stopPlayback" />
             <strong>{{ Math.round(previewProgress * 100) }}%</strong>
           </div>
         </div>
@@ -784,7 +870,7 @@ onBeforeUnmount(() => {
     <!-- Save Preset Modal -->
     <Teleport to="body">
       <div v-if="saveModalOpen" class="modal-backdrop" @click.self="saveModalOpen = false">
-        <div class="modal">
+        <div class="modal" role="dialog" aria-modal="true" aria-label="Save preset">
           <h3 class="modal-title">Save Preset</h3>
           <label class="field">
             <span class="field-label">Preset name</span>
@@ -794,7 +880,6 @@ onBeforeUnmount(() => {
               class="text-input"
               placeholder="e.g. Airport hop"
               @keydown.enter="confirmSave"
-              @keydown.escape="saveModalOpen = false"
             />
           </label>
           <div class="modal-actions">
@@ -806,7 +891,7 @@ onBeforeUnmount(() => {
 
       <!-- Load Preset Modal -->
       <div v-if="loadModalOpen" class="modal-backdrop" @click.self="loadModalOpen = false">
-        <div class="modal">
+        <div class="modal" role="dialog" aria-modal="true" aria-label="Load preset">
           <h3 class="modal-title">Load Preset</h3>
           <div v-if="!presets.length" class="field-hint" style="padding:8px 0;">No presets saved yet.</div>
           <div v-else class="modal-preset-list">
@@ -829,7 +914,7 @@ onBeforeUnmount(() => {
 
       <!-- Reset Confirmation Modal -->
       <div v-if="resetModalOpen" class="modal-backdrop" @click.self="resetModalOpen = false">
-        <div class="modal">
+        <div class="modal" role="dialog" aria-modal="true" aria-label="Reset route">
           <h3 class="modal-title">Reset Route</h3>
           <p style="font-size:13px;color:var(--text-secondary);">This will clear all route fields and return to defaults. Are you sure?</p>
           <div class="modal-actions">
@@ -841,7 +926,7 @@ onBeforeUnmount(() => {
 
       <!-- Avatar Config Modal -->
       <div v-if="avatarModalOpen" class="modal-backdrop" @click.self="avatarModalOpen = false">
-        <div class="modal">
+        <div class="modal" role="dialog" aria-modal="true" aria-label="Avatar settings">
           <h3 class="modal-title">Avatar Settings</h3>
           <div class="avatar-modal-preview">
             <img v-if="avatarPreviewUrl" :src="avatarPreviewUrl" alt="Avatar preview"
@@ -906,6 +991,14 @@ onBeforeUnmount(() => {
         @select="onSearchModalSelect"
         @close="closeSearchModal"
       />
+
+      <!-- Toasts -->
+      <div class="toast-stack" role="status" aria-live="polite">
+        <div v-for="toast in toasts" :key="toast.id" class="toast" :class="`toast-${toast.type}`">
+          <span class="toast-message">{{ toast.message }}</span>
+          <button type="button" class="toast-dismiss" aria-label="Dismiss notification" @click="dismissToast(toast.id)">&times;</button>
+        </div>
+      </div>
     </Teleport>
   </div>
 </template>

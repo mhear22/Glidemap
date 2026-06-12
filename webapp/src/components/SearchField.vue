@@ -41,6 +41,18 @@ function chooseResult(result: ProviderSearchResult): void {
   emit("select", result);
   open.value = false;
 }
+
+function onKeydown(event: KeyboardEvent): void {
+  const firstResult = props.results[0];
+  if (event.key === "Enter" && showDropdown.value && firstResult) {
+    event.preventDefault();
+    chooseResult(firstResult);
+  }
+  if (event.key === "Escape" && open.value) {
+    event.stopPropagation();
+    open.value = false;
+  }
+}
 </script>
 
 <template>
@@ -56,9 +68,14 @@ function chooseResult(result: ProviderSearchResult): void {
           :value="modelValue"
           class="text-input"
           placeholder="Search for a place"
+          role="combobox"
+          aria-autocomplete="list"
+          :aria-expanded="showDropdown"
+          :aria-label="label"
           @focus="open = true; emit('open-modal')"
           @blur="onBlur"
           @input="onInput"
+          @keydown="onKeydown"
         />
         <div v-if="loading" class="search-spinner" />
       </div>

@@ -1,5 +1,5 @@
-- [] The Camera and motion section includes duplicate information, remove the start zoom input and let the Start item be editable
-- [] The Camera and motion section includes duplicate information, remove the end zoom input and let the end item be editable
-- [] The Easing text is multi line on "moderate ease", this info needs to be contained to a single line
-- [] Remove public transport travel mode, it doesnt work
-- [] Make all inputs that can be modified visually stronger (brighter outline) for both light and dark mode
+- [x] The Camera and motion section includes duplicate information, remove the start zoom input and let the Start item be editable
+- [x] The Camera and motion section includes duplicate information, remove the end zoom input and let the end item be editable
+- [x] The Easing text is multi line on "moderate ease", this info needs to be contained to a single line
+- [x] Remove public transport travel mode, it doesnt work
+- [x] Make all inputs that can be modified visually stronger (brighter outline) for both light and dark mode

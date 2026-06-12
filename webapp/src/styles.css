@@ -5,7 +5,7 @@
   --surface-overlay: #21262d;
   --line: #30363d;
   --line-subtle: #21262d;
-  --input-border: #484f58;
+  --input-border: #6e7681;
   --text: #e6edf3;
   --text-secondary: #8b949e;
   --text-tertiary: #6e7681;
@@ -37,7 +37,7 @@
   --surface-overlay: #f0f2f5;
   --line: #d0d7de;
   --line-subtle: #e8ecf0;
-  --input-border: #afb8c4;
+  --input-border: #8c959f;
   --text: #1f2328;
   --text-secondary: #656d76;
   --text-tertiary: #8c959f;
@@ -551,6 +551,8 @@ a:hover {
   color: var(--text);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .curve-summary-item.editable {
@@ -1125,11 +1127,13 @@ a:hover {
   text-transform: capitalize;
 }
 
+.queue-status-badge.queued,
 .queue-status-badge.pending {
   background: rgba(210, 153, 34, 0.15);
   color: var(--warning);
 }
 
+.queue-status-badge.running,
 .queue-status-badge.processing {
   background: var(--accent-muted);
   color: var(--accent);
@@ -1625,4 +1629,73 @@ a:hover {
 
 [data-theme="light"] .overlay.active {
   background: rgba(0, 0, 0, 0.2);
+}
+
+/* ─── Toasts ───────────────────────────────────────────── */
+
+.toast-stack {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(360px, calc(100vw - 32px));
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: var(--surface-overlay);
+  color: var(--text);
+  font-size: 13px;
+  box-shadow: var(--shadow-lg);
+  animation: toast-in 160ms ease;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.toast-success {
+  border-color: var(--primary);
+}
+
+.toast-error {
+  border-color: var(--danger);
+}
+
+.toast-message {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+
+.toast-dismiss {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.toast-dismiss:hover {
+  background: var(--line);
+  color: var(--text);
 }

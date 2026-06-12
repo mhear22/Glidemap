@@ -29,6 +29,7 @@ function toSerializableMessage(message: RendererCommandMessage): RendererCommand
 }
 
 function onMessage(event: MessageEvent<RendererResponseMessage>): void {
+  if (event.origin !== window.location.origin) return;
   const payload = event.data;
   if (!payload || payload.namespace !== "mapanim") return;
   if (payload.type === "ready") { ready.value = true; return; }
