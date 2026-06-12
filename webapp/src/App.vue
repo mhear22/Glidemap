@@ -769,7 +769,13 @@ onBeforeUnmount(() => {
               <button type="button" class="info-link-btn" @click="openAboutPage">About page</button>
               <div class="info-divider" />
               <p class="info-credits-label">Built by</p>
-              <p class="info-credits">Mika, <a href="https://z.ai/chat" target="_blank" rel="noreferrer">GLM</a>, and <a href="https://openai.com/codex" target="_blank" rel="noreferrer">Codex</a></p>
+              <p class="info-credits">
+                <template v-for="(credit, index) in branding.builtBy" :key="credit.name">
+                  <template v-if="index > 0">{{ index === branding.builtBy.length - 1 ? ", and " : ", " }}</template>
+                  <a v-if="credit.url" :href="credit.url" target="_blank" rel="noreferrer">{{ credit.name }}</a>
+                  <template v-else>{{ credit.name }}</template>
+                </template>
+              </p>
             </div>
           </div>
         </div>

@@ -100,7 +100,14 @@ const features = [
     </main>
 
     <footer class="landing-footer">
-      <span>Built by Mika, <a href="https://z.ai/chat" target="_blank" rel="noreferrer">GLM</a>, and <a href="https://openai.com/codex" target="_blank" rel="noreferrer">Codex</a></span>
+      <span>
+        Built by
+        <template v-for="(credit, index) in branding.builtBy" :key="credit.name">
+          <template v-if="index > 0">{{ index === branding.builtBy.length - 1 ? ", and " : ", " }}</template>
+          <a v-if="credit.url" :href="credit.url" target="_blank" rel="noreferrer">{{ credit.name }}</a>
+          <template v-else>{{ credit.name }}</template>
+        </template>
+      </span>
       <span>Map data &copy; OpenStreetMap contributors &middot; Imagery &copy; Esri &middot; Basemap &copy; CARTO</span>
     </footer>
   </div>

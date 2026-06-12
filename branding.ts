@@ -11,8 +11,19 @@
 //   localStorage keys): renaming those breaks running installs for zero
 //   user-visible benefit. Leave them.
 
+export interface Credit {
+  name: string;
+  url?: string;
+}
+
 export const branding = {
   name: "Glidemap",
   tagline: "Turn a route into a map flyover video",
-  description: "Glidemap - Create animated map route videos"
+  description: "Glidemap - Create animated map route videos",
+  builtBy: [
+    { name: "Mika" },
+    { name: "GLM", url: "https://z.ai/chat" },
+    { name: "Codex", url: "https://openai.com/codex" },
+    { name: "Claude", url: "https://claude.com/claude-code" }
+  ] as Credit[]
 } as const;
