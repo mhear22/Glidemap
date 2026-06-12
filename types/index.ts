@@ -1,7 +1,7 @@
 export type { RouteConfig, PreparedRoute, ResolvedLocation, CameraConfig, NormalizedCamera, RoutedPath, LocationSpec } from "./route.js";
 export type { RenderJobStatus, RenderStage, RenderProgress, RenderJob, RenderResult, SerializedJob, JobSummary, SerializedResult } from "./render.js";
 export type { Provider, ProviderSearchResult, ProviderRegistry } from "./provider.js";
-export type { PresetSource, SearchResponse, PreviewResponse, PresetItem, PresetListResponse, PresetDetail, PresetSaveRequest, RenderJobsResponse, RenderJobCreateResponse } from "./api.js";
+export type { PresetSource, SearchResponse, PreviewResponse, PresetItem, PresetListResponse, PresetDetail, PresetSaveRequest, RenderJobsResponse, RenderJobCreateResponse, MetricsBucket, MetricsResponse } from "./api.js";
 export type {
   RendererApi,
   RendererWindow,

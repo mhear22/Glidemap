@@ -9,10 +9,13 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: 5173
+      MAPANIM_ADMIN_PORT: 5174
     ports:
       - "5173:5173"
+      - "5174:5174"
     volumes:
       - ./output:/app/output
       - ./presets:/app/presets
       - ./.tile-cache:/app/.tile-cache
+      - ./.metrics:/app/.metrics
       - ./routes.json:/app/routes.json

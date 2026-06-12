@@ -3,12 +3,15 @@
 
 # Build output
 /webapp/dist/
+/adminapp/dist/
 /web/renderer.js
+/*.tsbuildinfo
 
 # Generated renders and local presets
 /output/
 /.tmp/
 /.tile-cache/
+/.metrics/
 /presets/*.json
 
 # Logs

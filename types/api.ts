@@ -42,3 +42,22 @@ export interface RenderJobsResponse {
 export interface RenderJobCreateResponse {
   job: SerializedJob;
 }
+
+export interface MetricsBucket {
+  time: string;
+  visitors: number;
+  searches: number;
+  cacheHits: number;
+  cacheMisses: number;
+}
+
+export interface MetricsResponse {
+  buckets: MetricsBucket[];
+  summary: {
+    visitors: number;
+    searches: number;
+    cacheHits: number;
+    cacheMisses: number;
+    hitRate: number;
+  };
+}

@@ -9,20 +9,29 @@ npm install
 npm run install:browsers
 ```
 
-## Run The Webapp
+## Run The Apps
 
 ```bash
 npm run dev
 ```
 
-This now runs as a single Node process at [http://127.0.0.1:5173](http://127.0.0.1:5173). The app server mounts Vite in middleware mode, so the frontend, API, render surface, and tiles all come from the same dev server.
+This starts three development processes:
+
+- main app at [http://127.0.0.1:5173](http://127.0.0.1:5173)
+- admin app at [http://127.0.0.1:5174](http://127.0.0.1:5174)
+- shared backend API/render server at [http://127.0.0.1:4822](http://127.0.0.1:4822)
+
+Both frontends proxy `/api`, `/render`, `/output`, `/tiles`, and related asset requests back to that shared backend.
 
 If you want to run just the packaged local server, use:
 
 ```bash
 npm run build:webapp
-npm run dev:server
+npm run build:admin
+npm run serve
 ```
+
+That serves the built main app on [http://127.0.0.1:5173](http://127.0.0.1:5173) and the built admin app on [http://127.0.0.1:5174](http://127.0.0.1:5174).
 
 The app includes:
 
@@ -32,6 +41,7 @@ The app includes:
 - exact numeric controls for `durationSeconds` and `smoothing`
 - preset save/load from `presets/`
 - sequential render queue with live progress updates
+- a separate admin page for queue, preset, and output monitoring
 
 ## Render Everything
 
@@ -91,7 +101,7 @@ The older top-level `startZoom`, `endZoom`, and `cameraSmoothing` fields still w
 
 ## Container
 
-The repo now includes a root `Dockerfile` that works with Docker or Podman because it uses a standard OCI image layout. It installs Chromium for Playwright, `ffmpeg` for encoding, runs the test suite during the image build, builds the Vue app, and starts the packaged server on port `5173`.
+The repo now includes a root `Dockerfile` that works with Docker or Podman because it uses a standard OCI image layout. It installs Chromium for Playwright, `ffmpeg` for encoding, runs the test suite during the image build, builds both Vue frontends, and starts the packaged server on ports `5173` and `5174`.
 
 If you want to run the app with Compose, use [docker-compose.yml](./docker-compose.yml).
 
@@ -102,7 +112,10 @@ mkdir -p output presets .tile-cache
 podman compose up --build
 ```
 
-Then open [http://127.0.0.1:5173](http://127.0.0.1:5173).
+Then open:
+
+- [http://127.0.0.1:5173](http://127.0.0.1:5173) for the main app
+- [http://127.0.0.1:5174](http://127.0.0.1:5174) for the admin app
 
 If you prefer Docker, the equivalent command is:
 
@@ -122,9 +135,12 @@ Build and run the container locally:
 npm run docker
 ```
 
-This builds a local `mapanim:local` image, creates `output/` and `presets/` if needed, and runs the container on port `5173` with the project `routes.json` mounted in.
+This builds a local `mapanim:local` image, creates `output/` and `presets/` if needed, and runs the container with ports `5173` and `5174` exposed plus the project `routes.json` mounted in.
 
-Then open [http://127.0.0.1:5173](http://127.0.0.1:5173).
+Then open:
+
+- [http://127.0.0.1:5173](http://127.0.0.1:5173)
+- [http://127.0.0.1:5174](http://127.0.0.1:5174)
 
 Build and push the image to ECR with the current git commit hash as the tag:
 
@@ -139,4 +155,4 @@ Notes:
 - `--ipc=host` is recommended for Chromium stability in containers.
 - The `:Z` suffix is useful on SELinux-enabled Podman hosts.
 - Mounting `output/`, `presets/`, `.tile-cache`, and `routes.json` keeps your renders, cached tiles, and local data outside the container image.
-- If you still want the older split workflow, `npm run dev:webapp` can proxy to a separately started backend from `npm run dev:server` using `MAPANIM_API_PORT`.
+- You can still run the split workflow manually with `npm run dev:server`, `npm run dev:webapp`, and `npm run dev:admin`.

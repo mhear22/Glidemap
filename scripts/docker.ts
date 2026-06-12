@@ -25,6 +25,8 @@ run(containerEngine, [
   "--ipc=host",
   "-p",
   "5173:5173",
+  "-p",
+  "5174:5174",
   "-v",
   `${path.join(rootDir, "output")}:/app/output${suffix}`,
   "-v",

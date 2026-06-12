@@ -1,7 +1,7 @@
 import { createFrontendViteConfig } from "./vite.shared.js";
 
 export default createFrontendViteConfig({
-  root: "webapp",
-  defaultPort: 5173,
-  portEnv: "MAPANIM_WEBAPP_PORT"
+  root: "adminapp",
+  defaultPort: 5174,
+  portEnv: "MAPANIM_ADMIN_PORT"
 });
