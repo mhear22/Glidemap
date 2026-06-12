@@ -835,7 +835,7 @@ onBeforeUnmount(() => {
                   <input type="file" accept="image/png,image/jpeg,image/webp" class="avatar-file-input" @change="handleAvatarUpload" />
                 </label>
               </div>
-              <span class="field-hint">PNG/JPG, shown as a circle on the route</span>
+              <span class="field-hint">PNG/JPG, travels along the route &mdash; click it to adjust shape and border</span>
             </label>
           </div>
         </div>
