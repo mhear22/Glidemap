@@ -1,5 +1,9 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import vue from "@vitejs/plugin-vue";
 import { defineConfig, type UserConfigExport } from "vite";
+
+const repoRoot = path.dirname(fileURLToPath(import.meta.url));
 
 interface FrontendViteConfigOptions {
   root: string;
@@ -16,6 +20,10 @@ export function createFrontendViteConfig(options: FrontendViteConfigOptions): Us
   return defineConfig({
     plugins: [vue()],
     root,
+    // Each app needs its own dep-optimizer cache: sharing node_modules/.vite
+    // makes the two dev servers invalidate each other's pre-bundled deps,
+    // which 504s ("Outdated Optimize Dep") and leaves a blank page.
+    cacheDir: path.join(repoRoot, "node_modules", `.vite-${root}`),
     server: {
       port,
       strictPort: true,
