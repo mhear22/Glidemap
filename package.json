@@ -17,8 +17,8 @@
     "dev:webapp": "vite --config vite.config.ts",
     "dev:admin": "vite --config vite.admin.config.ts",
     "dev:server": "node --import tsx scripts/dev-server.ts",
-    "dev": "node --import tsx scripts/dev.ts",
-    "serve": "node --import tsx server/index.ts",
+    "dev": "npm run build:renderer && node --import tsx scripts/dev.ts",
+    "serve": "npm run build:renderer && node --import tsx server/index.ts",
     "render": "node --import tsx scripts/render.ts --config ./routes.json",
     "render:route": "node --import tsx scripts/render.ts",
     "test": "node --import tsx --test tests/*.test.ts"
