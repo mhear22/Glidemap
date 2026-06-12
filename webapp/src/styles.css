@@ -1699,3 +1699,300 @@ a:hover {
   background: var(--line);
   color: var(--text);
 }
+
+/* ─── Landing Page ─────────────────────────────────────── */
+
+.landing {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.landing-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--header-height);
+  padding: 0 24px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.landing-main {
+  flex: 1;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 56px 24px 64px;
+}
+
+.landing-intro h1 {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  line-height: 1.25;
+  margin-bottom: 14px;
+}
+
+.landing-intro > p {
+  font-size: 15px;
+  color: var(--text-secondary);
+  max-width: 580px;
+  margin-bottom: 22px;
+}
+
+.landing-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.landing-section {
+  margin-top: 52px;
+}
+
+.landing-section h2 {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.landing-steps {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.landing-steps li {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.landing-step-number {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.landing-steps strong {
+  display: block;
+  font-size: 14px;
+  margin-bottom: 2px;
+}
+
+.landing-steps p,
+.landing-features p {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.landing-features {
+  list-style: none;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.landing-features li {
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: 12px 14px;
+}
+
+.landing-features strong {
+  display: block;
+  font-size: 14px;
+  margin-bottom: 2px;
+}
+
+.landing-note {
+  font-size: 14px;
+  color: var(--text-secondary);
+  max-width: 620px;
+}
+
+.landing-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 16px 24px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+@media (max-width: 640px) {
+  .landing-features {
+    grid-template-columns: 1fr;
+  }
+
+  .landing-intro h1 {
+    font-size: 24px;
+  }
+}
+
+/* ─── Info dropdown links ──────────────────────────────── */
+
+.info-link-btn {
+  display: block;
+  text-align: left;
+  padding: 6px 8px;
+  margin: 0 -8px;
+  width: calc(100% + 16px);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--text);
+}
+
+.info-link-btn:hover {
+  background: var(--surface-overlay);
+}
+
+/* ─── Guided Tour ──────────────────────────────────────── */
+
+.tour-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+}
+
+.tour-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.tour-spotlight {
+  position: fixed;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--primary);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+  transition: top var(--transition-base), left var(--transition-base), width var(--transition-base), height var(--transition-base);
+}
+
+.tour-card {
+  position: fixed;
+  width: 320px;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  padding: 14px 16px;
+}
+
+.tour-progress {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-bottom: 6px;
+}
+
+.tour-card h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.tour-card p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+
+.tour-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.tour-actions-right {
+  display: flex;
+  gap: 8px;
+}
+
+@media (max-width: 380px) {
+  .tour-card {
+    width: calc(100vw - 24px);
+  }
+}
+
+/* ─── Help Modal ───────────────────────────────────────── */
+
+.help-modal {
+  max-width: 560px;
+  width: calc(100vw - 32px);
+}
+
+.help-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.help-header .modal-title {
+  margin-bottom: 0;
+}
+
+.help-body {
+  max-height: min(58vh, 520px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 8px 2px 8px 0;
+}
+
+.help-body h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.help-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.help-list li {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.help-list strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.help-list code {
+  font-size: 12px;
+  background: var(--surface-overlay);
+  border: 1px solid var(--line-subtle);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+.help-actions {
+  justify-content: space-between;
+}
+
+[data-theme="light"] .btn-primary {
+  color: #ffffff;
+}

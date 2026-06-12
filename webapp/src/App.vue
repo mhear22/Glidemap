@@ -6,6 +6,9 @@ import RenderPreview from "./components/RenderPreview.vue";
 import SearchField from "./components/SearchField.vue";
 import LocationSearchModal from "./components/LocationSearchModal.vue";
 import QueuePanel from "./components/QueuePanel.vue";
+import LandingPage from "./components/LandingPage.vue";
+import HelpModal from "./components/HelpModal.vue";
+import AppTour, { type TourStep } from "./components/AppTour.vue";
 import type {
   CameraConfig,
   FormCamera,
@@ -250,6 +253,89 @@ const avatarBgTransparent = computed({
 const sidebarOpen = ref(false);
 const queueOpen = ref(false);
 const infoOpen = ref(false);
+const helpOpen = ref(false);
+const tourOpen = ref(false);
+const showLanding = ref(localStorage.getItem("mapanim-landing-seen") !== "1");
+
+const tourSteps: TourStep[] = [
+  {
+    target: '[data-tour="origin"]',
+    title: "Start with two places",
+    body: "Click here to search for the origin. A map picker opens so you can see exactly which result you're choosing.",
+    sidebar: true
+  },
+  {
+    target: '[data-tour="destination"]',
+    title: "Add the destination",
+    body: "Same again for where the journey ends. Once both are set, the preview loads automatically.",
+    sidebar: true
+  },
+  {
+    target: '[data-tour="mode"]',
+    title: "Choose travel mode and style",
+    body: "Walking and driving follow real roads; flying draws an arc for long hops. Map style switches between satellite imagery and a standard map.",
+    sidebar: true
+  },
+  {
+    target: '[data-tour="camera"]',
+    title: "Shape the camera move",
+    body: "The zoom curve sets how far the camera pulls out mid-flight; the easing curve sets the pacing. Drag the handles, or click the values to type exact numbers.",
+    sidebar: true
+  },
+  {
+    target: '[data-tour="timeline"]',
+    title: "Preview before rendering",
+    body: "Press play or drag the slider to scrub through the move. What you see here is exactly what gets rendered.",
+    sidebar: false
+  },
+  {
+    target: '[data-tour="queue"]',
+    title: "Queue the render",
+    body: "When it looks right, Queue renders the animation to an MP4. Save and Load keep route setups as presets.",
+    sidebar: true
+  },
+  {
+    target: '[data-tour="queue-status"]',
+    title: "Track progress here",
+    body: "Renders run in the background — follow frame-by-frame progress in this queue and open the finished MP4 from it.",
+    sidebar: false
+  }
+];
+
+function enterStudio(): void {
+  localStorage.setItem("mapanim-landing-seen", "1");
+  showLanding.value = false;
+  if (localStorage.getItem("mapanim-tour-done") !== "1") {
+    window.setTimeout(() => {
+      tourOpen.value = true;
+    }, 400);
+  }
+}
+
+function openGuideFromLanding(): void {
+  localStorage.setItem("mapanim-landing-seen", "1");
+  showLanding.value = false;
+  helpOpen.value = true;
+}
+
+function startTour(): void {
+  helpOpen.value = false;
+  infoOpen.value = false;
+  tourOpen.value = true;
+}
+
+function onTourChange(stepIndex: number): void {
+  const step = tourSteps[stepIndex];
+  if (step) {
+    sidebarOpen.value = Boolean(step.sidebar);
+  }
+}
+
+function onTourClose(): void {
+  tourOpen.value = false;
+  sidebarOpen.value = false;
+  localStorage.setItem("mapanim-tour-done", "1");
+}
 const darkMode = ref(localStorage.getItem("theme") !== "light");
 
 watch(darkMode, (v: boolean) => {
@@ -575,6 +661,8 @@ let clickOutsideHandler: ((e: MouseEvent) => void) | null = null;
 let escapeHandler: ((e: KeyboardEvent) => void) | null = null;
 
 function closeTopmostOverlay(): boolean {
+  if (tourOpen.value) { onTourClose(); return true; }
+  if (helpOpen.value) { helpOpen.value = false; return true; }
   if (searchModalOpen.value) { searchModalOpen.value = false; return true; }
   if (avatarModalOpen.value) { avatarModalOpen.value = false; return true; }
   if (resetModalOpen.value) { resetModalOpen.value = false; return true; }
@@ -629,7 +717,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="app-shell">
+  <LandingPage v-if="showLanding" @enter="enterStudio" @guide="openGuideFromLanding" />
+  <div v-else class="app-shell">
     <!-- Header -->
     <header class="app-header">
       <div class="app-logo">
@@ -654,12 +743,19 @@ onBeforeUnmount(() => {
             <div class="info-dropdown-body">
               <p>MapAnim creates animated map route videos. Configure origin and destination points, choose a travel mode, adjust camera motion curves, and render smooth flyover animations as MP4.</p>
               <div class="info-divider" />
+              <button type="button" class="info-link-btn" @click="infoOpen = false; helpOpen = true">How to use MapAnim</button>
+              <button type="button" class="info-link-btn" @click="startTour">Show the tour</button>
+              <button type="button" class="info-link-btn" @click="infoOpen = false; showLanding = true">About page</button>
+              <div class="info-divider" />
               <p class="info-credits-label">Built by</p>
               <p class="info-credits">Mika, <a href="https://z.ai/chat" target="_blank" rel="noreferrer">GLM</a>, and <a href="https://openai.com/codex" target="_blank" rel="noreferrer">Codex</a></p>
             </div>
           </div>
         </div>
-        <div ref="queueWrapRef" class="queue-trigger-wrap">
+        <button class="btn btn-sm" @click="helpOpen = true" title="Help" aria-label="Open help">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        </button>
+        <div ref="queueWrapRef" class="queue-trigger-wrap" data-tour="queue-status">
           <button class="btn btn-sm queue-trigger" @click="toggleQueue" :class="{ active: queueOpen }" :title="`${jobs.length} render job${jobs.length === 1 ? '' : 's'}`" aria-label="Render queue" :aria-expanded="queueOpen">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
@@ -720,6 +816,7 @@ onBeforeUnmount(() => {
           <div class="section-header"><h2>Locations</h2></div>
           <div style="display:flex;flex-direction:column;gap:10px;">
             <SearchField
+              data-tour="origin"
               :model-value="route.start.query"
               label="Origin"
               :results="searchState.startResults"
@@ -731,6 +828,7 @@ onBeforeUnmount(() => {
               @open-modal="openSearchModal('start')"
             />
             <SearchField
+              data-tour="destination"
               :model-value="route.end.query"
               label="Destination"
               :results="searchState.endResults"
@@ -741,7 +839,7 @@ onBeforeUnmount(() => {
               @select="applySearchResult('end', $event)"
               @open-modal="openSearchModal('end')"
             />
-            <div class="field-row">
+            <div class="field-row" data-tour="mode">
               <label class="field">
                 <span class="field-label">Travel mode</span>
                 <select v-model="route.mode" class="select-input">
@@ -764,7 +862,7 @@ onBeforeUnmount(() => {
         <div class="section-divider" />
 
         <!-- Camera & Motion -->
-        <div class="section">
+        <div class="section" data-tour="camera">
           <div class="section-header"><h2>Camera &amp; Motion</h2></div>
           <CurveEditor
             :camera="route.camera"
@@ -803,7 +901,7 @@ onBeforeUnmount(() => {
 
       <!-- Persistent bottom panel -->
       <div class="sidebar-panel">
-        <div class="sidebar-panel-actions">
+        <div class="sidebar-panel-actions" data-tour="queue">
           <button type="button" class="btn btn-primary sidebar-panel-btn" :disabled="!canQueueRender" @click="queueRender">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3" /></svg>
             Queue
@@ -847,7 +945,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div class="preview-overlay-bottom">
-          <div class="timeline">
+          <div class="timeline" data-tour="timeline">
             <div class="timeline-meta">
               <button
                 class="btn btn-sm play-btn"
@@ -991,6 +1089,12 @@ onBeforeUnmount(() => {
         @select="onSearchModalSelect"
         @close="closeSearchModal"
       />
+
+      <!-- Help -->
+      <HelpModal :open="helpOpen" @close="helpOpen = false" @tour="startTour" />
+
+      <!-- Guided tour -->
+      <AppTour :open="tourOpen" :steps="tourSteps" @change="onTourChange" @close="onTourClose" />
 
       <!-- Toasts -->
       <div class="toast-stack" role="status" aria-live="polite">
