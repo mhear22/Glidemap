@@ -255,7 +255,8 @@ const queueOpen = ref(false);
 const infoOpen = ref(false);
 const helpOpen = ref(false);
 const tourOpen = ref(false);
-const showLanding = ref(localStorage.getItem("mapanim-landing-seen") !== "1");
+// "/" is the about page, "/studio" is the editor.
+const showLanding = ref(window.location.pathname !== "/studio");
 
 const tourSteps: TourStep[] = [
   {
@@ -302,9 +303,14 @@ const tourSteps: TourStep[] = [
   }
 ];
 
-function enterStudio(): void {
-  localStorage.setItem("mapanim-landing-seen", "1");
-  showLanding.value = false;
+function navigate(path: string): void {
+  if (window.location.pathname !== path) {
+    window.history.pushState({}, "", path);
+  }
+  showLanding.value = path !== "/studio";
+}
+
+function maybeStartTour(): void {
   if (localStorage.getItem("mapanim-tour-done") !== "1") {
     window.setTimeout(() => {
       tourOpen.value = true;
@@ -312,10 +318,19 @@ function enterStudio(): void {
   }
 }
 
+function enterStudio(): void {
+  navigate("/studio");
+  maybeStartTour();
+}
+
 function openGuideFromLanding(): void {
-  localStorage.setItem("mapanim-landing-seen", "1");
-  showLanding.value = false;
+  navigate("/studio");
   helpOpen.value = true;
+}
+
+function openAboutPage(): void {
+  infoOpen.value = false;
+  navigate("/");
 }
 
 function startTour(): void {
@@ -659,6 +674,7 @@ watch(() => toPreviewConfig(route), () => schedulePreview(), { deep: true, immed
 
 let clickOutsideHandler: ((e: MouseEvent) => void) | null = null;
 let escapeHandler: ((e: KeyboardEvent) => void) | null = null;
+let popStateHandler: (() => void) | null = null;
 
 function closeTopmostOverlay(): boolean {
   if (tourOpen.value) { onTourClose(); return true; }
@@ -700,6 +716,13 @@ onMounted(async () => {
     }
   };
   document.addEventListener("keydown", escapeHandler);
+  popStateHandler = () => {
+    showLanding.value = window.location.pathname !== "/studio";
+  };
+  window.addEventListener("popstate", popStateHandler);
+  if (!showLanding.value) {
+    maybeStartTour();
+  }
 });
 
 onBeforeUnmount(() => {
@@ -713,6 +736,7 @@ onBeforeUnmount(() => {
   if (visibilityChangeHandler) document.removeEventListener("visibilitychange", visibilityChangeHandler);
   if (clickOutsideHandler) document.removeEventListener("click", clickOutsideHandler);
   if (escapeHandler) document.removeEventListener("keydown", escapeHandler);
+  if (popStateHandler) window.removeEventListener("popstate", popStateHandler);
 });
 </script>
 
@@ -745,7 +769,7 @@ onBeforeUnmount(() => {
               <div class="info-divider" />
               <button type="button" class="info-link-btn" @click="infoOpen = false; helpOpen = true">How to use MapAnim</button>
               <button type="button" class="info-link-btn" @click="startTour">Show the tour</button>
-              <button type="button" class="info-link-btn" @click="infoOpen = false; showLanding = true">About page</button>
+              <button type="button" class="info-link-btn" @click="openAboutPage">About page</button>
               <div class="info-divider" />
               <p class="info-credits-label">Built by</p>
               <p class="info-credits">Mika, <a href="https://z.ai/chat" target="_blank" rel="noreferrer">GLM</a>, and <a href="https://openai.com/codex" target="_blank" rel="noreferrer">Codex</a></p>

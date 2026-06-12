@@ -1996,3 +1996,22 @@ a:hover {
 [data-theme="light"] .btn-primary {
   color: #ffffff;
 }
+
+.landing-reel {
+  margin-top: 40px;
+}
+
+.landing-reel video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+.landing-reel-caption {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
