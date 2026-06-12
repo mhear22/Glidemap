@@ -1,0 +1,48 @@
+name: Code Review
+
+# Automated Claude code review on every PR, powered by Opus 4.8.
+# Requires the ANTHROPIC_API_KEY repository secret.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  review:
+    # Skip drafts; review once the author marks the PR ready
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: --model claude-opus-4-8
+          prompt: |
+            Review this pull request as a senior engineer familiar with this
+            codebase: a Vue 3 + TypeScript app (Glidemap) with a Node render
+            server that drives Playwright + ffmpeg to produce map route
+            videos, plus GitHub Actions release automation.
+
+            Review the diff for, in priority order:
+            1. Correctness bugs: state machines, Vue reactivity mistakes,
+               event listener/timer leaks, race conditions in async code,
+               and anything that breaks the render pipeline.
+            2. Security issues in changed code.
+            3. CI/workflow changes: expression/quoting bugs, permission
+               scope, and version-gating logic.
+            4. Quality: dead code, accessibility regressions, and stale copy.
+
+            Report every issue you find, including ones you are uncertain
+            about or consider low-severity — include a confidence level and
+            an estimated severity for each finding so the author can rank
+            them. Reference findings as file:line. Do not comment on style
+            preferences the codebase doesn't already follow. End with a
+            short verdict: ready to merge, or what to fix first.
