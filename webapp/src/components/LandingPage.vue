@@ -64,7 +64,7 @@ const features = [
       <section class="landing-reel">
         <video src="/about-reel.mp4" autoplay muted loop playsinline aria-label="Reel of three MapAnim renders" />
         <p class="landing-reel-caption">
-          Straight out of the renderer: a satellite walk through Melbourne, a drive across Paris, and a Melbourne&ndash;Sydney flight arc.
+          Straight out of the renderer: a satellite walk through Melbourne, a custom avatar crossing London, a drive across Paris, and a Melbourne&ndash;Sydney flight arc.
         </p>
       </section>
 
