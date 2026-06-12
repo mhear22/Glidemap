@@ -13,6 +13,7 @@ import { prepareRoute } from "../lib/routes.js";
 import { createTileCache } from "../lib/tile-cache.js";
 import { createMetricsCollector } from "../lib/metrics.js";
 import { contentTypeFor, isRecord, toError } from "../lib/utils.js";
+import { branding } from "../branding.js";
 
 interface FrontendHost {
   kind: "main" | "admin";
@@ -399,11 +400,11 @@ function resolvePublicOrigin(host: string, port: number): string {
 function logListener(label: string, host: string, port: number): void {
   const publicOrigin = resolvePublicOrigin(host, port);
   if (host === "0.0.0.0") {
-    console.log(`MapAnim ${label} running at ${publicOrigin} (listening on ${host}:${port})`);
+    console.log(`${branding.name} ${label} running at ${publicOrigin} (listening on ${host}:${port})`);
     return;
   }
 
-  console.log(`MapAnim ${label} running at ${publicOrigin}`);
+  console.log(`${branding.name} ${label} running at ${publicOrigin}`);
 }
 
 async function listen(server: http.Server, host: string, port: number): Promise<number> {

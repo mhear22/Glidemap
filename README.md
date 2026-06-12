@@ -1,6 +1,8 @@
-# MapAnim
+# Glidemap
 
 Render map videos from a root-level route JSON, or use the local webapp to search locations, tune the camera curve, preview the route, save presets, and queue MP4 exports.
+
+The product name lives in [branding.ts](./branding.ts) — change it there and every user-facing surface (header, landing page, help, admin, titles, server logs) follows. The static `<title>` tags in `webapp/index.html`, `adminapp/index.html`, and `web/index.html` are pre-JS fallbacks that need a manual update on rename. Internal identifiers (docker image names, the `mapanim` postMessage namespace, service-worker cache name, localStorage keys) deliberately keep the old name so running installs don't break.
 
 ## Setup
 

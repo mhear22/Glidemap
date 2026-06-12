@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import BrandMark from "./BrandMark.vue";
+import { branding } from "../../../branding.js";
+
 const emit = defineEmits<{
   (e: "enter"): void;
   (e: "guide"): void;
@@ -37,21 +40,16 @@ const features = [
   <div class="landing">
     <header class="landing-header">
       <div class="app-logo">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" />
-          <line x1="8" y1="2" x2="8" y2="18" />
-          <line x1="16" y1="6" x2="16" y2="22" />
-        </svg>
-        MapAnim
+        <BrandMark />
       </div>
       <button type="button" class="btn btn-primary" @click="emit('enter')">Open the studio</button>
     </header>
 
     <main class="landing-main">
       <section class="landing-intro">
-        <h1>Turn a route into a map flyover video</h1>
+        <h1>{{ branding.tagline }}</h1>
         <p>
-          MapAnim animates the journey between two places — a smooth camera move that
+          {{ branding.name }} animates the journey between two places — a smooth camera move that
           starts on the origin, pulls out to show the whole route, and lands on the
           destination — and renders it to MP4. It runs entirely on your machine.
         </p>
@@ -62,7 +60,7 @@ const features = [
       </section>
 
       <section class="landing-reel">
-        <video src="/about-reel.mp4" autoplay muted loop playsinline aria-label="Reel of three MapAnim renders" />
+        <video src="/about-reel.mp4" autoplay muted loop playsinline :aria-label="`Reel of ${branding.name} renders`" />
         <p class="landing-reel-caption">
           Straight out of the renderer: a satellite walk through Melbourne, a custom avatar crossing London, a drive across Paris, and a Melbourne&ndash;Sydney flight arc.
         </p>

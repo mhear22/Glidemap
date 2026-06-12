@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import BrandMark from "../../webapp/src/components/BrandMark.vue";
+import { branding } from "../../branding.js";
 import type { MetricsResponse, MetricsBucket } from "../../types/index.js";
 
 const metrics = ref<MetricsResponse | null>(null);
@@ -105,15 +107,11 @@ onBeforeUnmount(() => {
   <div class="app-shell">
     <header class="app-header">
       <div class="app-logo">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" />
-          <line x1="8" y1="2" x2="8" y2="18" />
-          <line x1="16" y1="6" x2="16" y2="22" />
-        </svg>
-        MapAnim Admin
+        <BrandMark />
+        <span>Admin</span>
       </div>
       <div class="header-actions">
-        <span class="status-badge status-badge-green">Metrics</span>
+        <span class="status-badge status-badge-green" :title="`${branding.name} metrics`">Metrics</span>
       </div>
     </header>
 

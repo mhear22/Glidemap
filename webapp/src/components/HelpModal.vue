@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { branding } from "../../../branding.js";
+
 defineProps<{
   open: boolean;
 }>();
@@ -11,9 +13,9 @@ const emit = defineEmits<{
 
 <template>
   <div v-if="open" class="modal-backdrop" @click.self="emit('close')">
-    <div class="modal help-modal" role="dialog" aria-modal="true" aria-label="How to use MapAnim">
+    <div class="modal help-modal" role="dialog" aria-modal="true" :aria-label="`How to use ${branding.name}`">
       <div class="help-header">
-        <h3 class="modal-title">How to use MapAnim</h3>
+        <h3 class="modal-title">How to use {{ branding.name }}</h3>
         <button type="button" class="btn btn-sm" title="Close" aria-label="Close help" @click="emit('close')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <line x1="18" y1="6" x2="6" y2="18" />

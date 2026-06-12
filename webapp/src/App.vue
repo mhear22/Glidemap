@@ -9,6 +9,8 @@ import QueuePanel from "./components/QueuePanel.vue";
 import LandingPage from "./components/LandingPage.vue";
 import HelpModal from "./components/HelpModal.vue";
 import AppTour, { type TourStep } from "./components/AppTour.vue";
+import BrandMark from "./components/BrandMark.vue";
+import { branding } from "../../branding.js";
 import type {
   CameraConfig,
   FormCamera,
@@ -746,12 +748,7 @@ onBeforeUnmount(() => {
     <!-- Header -->
     <header class="app-header">
       <div class="app-logo">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" />
-          <line x1="8" y1="2" x2="8" y2="18" />
-          <line x1="16" y1="6" x2="16" y2="22" />
-        </svg>
-        MapAnim
+        <BrandMark />
       </div>
       <div class="header-actions">
         <button class="btn btn-sm theme-toggle" @click="darkMode = !darkMode" :title="darkMode ? 'Switch to light mode' : 'Switch to dark mode'" :aria-label="darkMode ? 'Switch to light mode' : 'Switch to dark mode'">
@@ -759,15 +756,15 @@ onBeforeUnmount(() => {
           <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
         </button>
         <div ref="infoWrapRef" class="info-trigger-wrap">
-          <button class="btn btn-sm info-toggle" @click="infoOpen = !infoOpen" :class="{ active: infoOpen }" title="About MapAnim" aria-label="About MapAnim" :aria-expanded="infoOpen">
+          <button class="btn btn-sm info-toggle" @click="infoOpen = !infoOpen" :class="{ active: infoOpen }" :title="`About ${branding.name}`" :aria-label="`About ${branding.name}`" :aria-expanded="infoOpen">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
           </button>
           <div v-if="infoOpen" class="info-dropdown" @click.stop>
-            <div class="info-dropdown-header">About MapAnim</div>
+            <div class="info-dropdown-header">About {{ branding.name }}</div>
             <div class="info-dropdown-body">
-              <p>MapAnim creates animated map route videos. Configure origin and destination points, choose a travel mode, adjust camera motion curves, and render smooth flyover animations as MP4.</p>
+              <p>{{ branding.name }} creates animated map route videos. Configure origin and destination points, choose a travel mode, adjust camera motion curves, and render smooth flyover animations as MP4.</p>
               <div class="info-divider" />
-              <button type="button" class="info-link-btn" @click="infoOpen = false; helpOpen = true">How to use MapAnim</button>
+              <button type="button" class="info-link-btn" @click="infoOpen = false; helpOpen = true">How to use {{ branding.name }}</button>
               <button type="button" class="info-link-btn" @click="startTour">Show the tour</button>
               <button type="button" class="info-link-btn" @click="openAboutPage">About page</button>
               <div class="info-divider" />

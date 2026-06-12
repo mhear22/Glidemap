@@ -319,3 +319,9 @@ a:hover {
     padding: 12px;
   }
 }
+
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}

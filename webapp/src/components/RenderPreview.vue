@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import BrandMark from "./BrandMark.vue";
 import type { PreparedRoute } from "../types.js";
 import type { RenderFrameMessage, RendererCommandMessage, RendererResponseMessage, SetSceneMessage } from "../../../types/web.js";
 
@@ -88,11 +89,7 @@ onBeforeUnmount(() => { window.removeEventListener("message", onMessage); });
   <div class="preview-frame-wrap">
     <iframe ref="iframeRef" title="Map animation preview" src="/render/" />
     <div v-if="!route" class="preview-empty">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" />
-        <line x1="8" y1="2" x2="8" y2="18" />
-        <line x1="16" y1="6" x2="16" y2="22" />
-      </svg>
+      <BrandMark :show-name="false" />
       Search two locations to load a preview
     </div>
   </div>
