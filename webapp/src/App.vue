@@ -252,6 +252,7 @@ const avatarBgTransparent = computed({
   set: (v: boolean) => { route.avatarBgColor = v ? "" : "#ffffff"; }
 });
 
+const appVersion = __APP_VERSION__;
 const sidebarOpen = ref(false);
 const queueOpen = ref(false);
 const infoOpen = ref(false);
@@ -760,7 +761,10 @@ onBeforeUnmount(() => {
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
           </button>
           <div v-if="infoOpen" class="info-dropdown" @click.stop>
-            <div class="info-dropdown-header">About {{ branding.name }}</div>
+            <div class="info-dropdown-header">
+              <span>About {{ branding.name }}</span>
+              <span class="info-version">v{{ appVersion }}</span>
+            </div>
             <div class="info-dropdown-body">
               <p>{{ branding.name }} creates animated map route videos. Configure origin and destination points, choose a travel mode, adjust camera motion curves, and render smooth flyover animations as MP4.</p>
               <div class="info-divider" />

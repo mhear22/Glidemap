@@ -2021,3 +2021,17 @@ a:hover {
   align-items: center;
   gap: 10px;
 }
+
+.info-dropdown-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.info-version {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
