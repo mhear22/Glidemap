@@ -466,14 +466,21 @@ function sleep(milliseconds: number): Promise<void> {
   });
 }
 
-async function waitForIdle(timeoutMs = 2500): Promise<void> {
+// Wait until every tile in view has loaded (or errored), re-checking
+// periodically because an "idle" event can fire between checks and be missed.
+async function waitForIdle(timeoutMs = 10000): Promise<void> {
   const map = requireMap();
-  if (map.loaded() && map.areTilesLoaded()) {
-    await sleep(120);
-    return;
+  const deadline = performance.now() + timeoutMs;
+
+  while (!(map.loaded() && map.areTilesLoaded())) {
+    const remaining = deadline - performance.now();
+    if (remaining <= 0) {
+      break;
+    }
+
+    await waitForMapEvent("idle", Math.min(remaining, 1000));
   }
 
-  await waitForMapEvent("idle", timeoutMs);
   await sleep(120);
 }
 
@@ -745,17 +752,13 @@ async function setScene(scene: PreparedRoute): Promise<void> {
   await waitForIdle();
 }
 
+// Prime along the actual animation path so frame capture rarely has to wait.
+// renderFrame uses the exact camera math, so the tiles it loads here are the
+// tiles each captured frame will need.
 async function primeTiles(): Promise<void> {
-  const map = requireMap();
-  const cameras = requireCameras();
-  for (const camera of [cameras.overview, cameras.start, cameras.end]) {
-    map.jumpTo({
-      center: camera.center,
-      zoom: camera.zoom,
-      bearing: 0,
-      pitch: 0
-    });
-    await waitForIdle();
+  const primeSamples = 9;
+  for (let index = 0; index < primeSamples; index += 1) {
+    await renderFrame(index / (primeSamples - 1));
   }
 }
 
@@ -815,6 +818,12 @@ async function renderFrame(progress: number): Promise<void> {
       type: "FeatureCollection",
       features
     });
+  }
+
+  // Never hand a frame back while tiles in view are still loading — captured
+  // frames are permanent, so a blank tile here means a blank tile in the MP4.
+  if (!map.areTilesLoaded()) {
+    await waitForIdle(8000);
   }
 
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));

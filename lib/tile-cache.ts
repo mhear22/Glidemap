@@ -37,6 +37,48 @@ interface TileResult {
   cacheStatus: "hit" | "miss";
 }
 
+const FETCH_TIMEOUT_MS = 15_000;
+const FETCH_ATTEMPTS = 3;
+const RETRY_DELAYS_MS = [250, 1000];
+
+function isRetryableStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
+// Upstream tile servers intermittently hang or return transient errors; a
+// timeout is also what keeps a stuck fetch from wedging the inflight map.
+async function fetchTileWithRetry(url: string): Promise<Buffer> {
+  let lastError: Error = new Error("Tile fetch failed");
+
+  for (let attempt = 0; attempt < FETCH_ATTEMPTS; attempt += 1) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt - 1] ?? 1000));
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        headers: { "User-Agent": "MapAnim-TileCache/1.0" },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
+      });
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      continue;
+    }
+
+    if (response.ok) {
+      return Buffer.from(await response.arrayBuffer());
+    }
+
+    lastError = new Error(`Tile fetch failed: ${response.status}`);
+    if (!isRetryableStatus(response.status)) {
+      throw lastError;
+    }
+  }
+
+  throw lastError;
+}
+
 export function createTileCache({ cacheDir }: { cacheDir?: string } = {}): TileCache {
   const dir = cacheDir ?? path.resolve(process.cwd(), ".tile-cache");
   const inflight = new Map<string, Promise<TileResult>>();
@@ -81,13 +123,7 @@ export function createTileCache({ cacheDir }: { cacheDir?: string } = {}): TileC
 
     const promise = (async (): Promise<TileResult> => {
       const url = remoteUrl(provider, z, x, y);
-      const response = await fetch(url, {
-        headers: { "User-Agent": "MapAnim-TileCache/1.0" }
-      });
-      if (!response.ok) {
-        throw new Error(`Tile fetch failed: ${response.status}`);
-      }
-      const buffer = Buffer.from(await response.arrayBuffer());
+      const buffer = await fetchTileWithRetry(url);
       await ensureDir(path.dirname(filePath));
       const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
       await fs.writeFile(tempPath, buffer);
