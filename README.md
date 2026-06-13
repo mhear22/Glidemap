@@ -105,12 +105,14 @@ The older top-level `startZoom`, `endZoom`, and `cameraSmoothing` fields still w
 
 Releases are driven by the `release` branch and [.github/workflows/release.yml](./.github/workflows/release.yml):
 
-1. Bump `version` in [package.json](./package.json).
+1. Bump the version in [VERSION](./VERSION).
 2. Push (or merge) to the `release` branch.
 
 The workflow builds the Docker image (the image build runs the test suite), pushes it to `ghcr.io/<owner>/glidemap` tagged `v<version>`, `sha-<commit>`, and `latest`, then creates a `v<version>` git tag and GitHub release. It refuses to run if the version tag already exists, so every release requires a version bump. The default `GITHUB_TOKEN` is enough for same-repo ghcr pushes; make sure the repository's Actions settings allow read/write workflow permissions.
 
-The app displays its version (from package.json) in the studio's info dropdown.
+The version lives in `VERSION` rather than `package.json` so that `package.json`'s bytes stay stable across releases — that keeps the Docker deps layer (`npm ci` + the Chromium install) a build-cache hit, so only the tests and frontend builds re-run per release.
+
+The app displays its version (from `VERSION`, injected at build time) in the studio's info dropdown.
 
 ## Container
 

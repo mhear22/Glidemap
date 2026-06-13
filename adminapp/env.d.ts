@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-// Injected by vite.shared.ts from the package.json version.
+// Injected by vite.shared.ts from the VERSION file.
 declare const __APP_VERSION__: string;
 
 declare module "*.vue" {

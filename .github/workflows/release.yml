@@ -1,8 +1,13 @@
 name: Release
 
-# Releases happen by bumping "version" in package.json and pushing to the
-# release branch. The job refuses to run twice for the same version, so every
-# image and GitHub release is tied to a unique semver tag.
+# Releases happen by bumping the version in the top-level VERSION file and
+# pushing to the release branch. The job refuses to run twice for the same
+# version, so every image and GitHub release is tied to a unique semver tag.
+#
+# The version lives in VERSION (not package.json) on purpose: package.json gates
+# the Docker deps layer (npm ci + the ~170MB Chromium install), so keeping its
+# bytes stable across releases lets that layer stay a cache hit. Only VERSION and
+# source change per release, which re-runs just the tests + frontend builds.
 on:
   push:
     branches: [release]
@@ -28,12 +33,12 @@ jobs:
         with:
           fetch-depth: 0 # full history so existing version tags are visible
 
-      - name: Read version from package.json
+      - name: Read version from VERSION file
         id: version
         run: |
-          version="$(node -p "require('./package.json').version")"
+          version="$(tr -d '[:space:]' < VERSION)"
           if ! echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+].+)?$'; then
-            echo "::error::package.json version \"$version\" is not a valid semver string."
+            echo "::error::VERSION file contents \"$version\" is not a valid semver string."
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -47,7 +52,7 @@ jobs:
           if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
             tagged_commit="$(git rev-list -n 1 "$tag")"
             if [ "$tagged_commit" != "$GITHUB_SHA" ]; then
-              echo "::error::$tag already exists for a different commit. Bump \"version\" in package.json before pushing to release."
+              echo "::error::$tag already exists for a different commit. Bump the version in VERSION before pushing to release."
               exit 1
             fi
             echo "$tag already points at this commit; continuing as a re-run."
@@ -91,8 +96,12 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.version=${{ steps.version.outputs.version }}
             org.opencontainers.image.revision=${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Registry-backed cache: unlike type=gha (hard 10GB eviction limit,
+          # which evicts the ~1.5GB node+Chromium deps layer between releases),
+          # a dedicated buildcache tag in ghcr persists, so the Chromium download
+          # + npm ci layer is a reliable cache hit when package*.json is unchanged.
+          cache-from: type=registry,ref=${{ steps.image.outputs.image }}:buildcache
+          cache-to: type=registry,ref=${{ steps.image.outputs.image }}:buildcache,mode=max
 
       - name: Create GitHub release
         env:

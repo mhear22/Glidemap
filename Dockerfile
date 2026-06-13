@@ -13,8 +13,25 @@ RUN apt-get update \
 
 COPY package.json package-lock.json ./
 
-RUN npm ci \
-    && npx playwright install --with-deps chromium
+RUN npm ci
+
+# Install Chromium's OS dependencies (apt) as their own cacheable layer.
+RUN npx playwright install-deps chromium
+
+# Download the Chromium build separately, wrapped in a timeout + retry. The
+# Playwright "Chrome for Testing" CDN download has hung indefinitely after
+# reaching 100% on some builds (e.g. playwright 1.59.1 / chromium 147), which
+# stalls the whole image build for hours. A hard timeout turns such a stall
+# into a fast retry instead of a hang. The Playwright version is pinned in
+# package.json so the browser build can't silently float onto a broken one.
+RUN for attempt in 1 2 3; do \
+        echo "playwright chromium download attempt ${attempt}"; \
+        timeout 600 npx playwright install chromium && exit 0; \
+        echo "attempt ${attempt} failed or stalled; retrying in 10s"; \
+        sleep 10; \
+    done; \
+    echo "playwright chromium download failed after 3 attempts" >&2; \
+    exit 1
 
 COPY . .
 

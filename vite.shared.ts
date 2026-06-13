@@ -5,8 +5,9 @@ import vue from "@vitejs/plugin-vue";
 import { defineConfig, type UserConfigExport } from "vite";
 
 const repoRoot = path.dirname(fileURLToPath(import.meta.url));
-const packageJson = JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8")) as { version?: string };
-const appVersion = packageJson.version ?? "0.0.0";
+// The release version lives in VERSION (not package.json) so that package.json's
+// bytes stay stable across releases and the Docker deps layer stays a cache hit.
+const appVersion = readFileSync(path.join(repoRoot, "VERSION"), "utf8").trim() || "0.0.0";
 
 interface FrontendViteConfigOptions {
   root: string;
