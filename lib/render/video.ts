@@ -18,6 +18,31 @@ async function ensureOutputDir(rootDir: string, filePath: string): Promise<void>
   await ensureDir(path.dirname(path.resolve(rootDir, filePath)));
 }
 
+// Reuse one warm Chromium across render jobs (the queue runs them serially);
+// cold-launching the browser per job is one of the most expensive steps.
+let sharedBrowser: Browser | null = null;
+
+async function getBrowser(): Promise<Browser> {
+  if (sharedBrowser && sharedBrowser.isConnected()) {
+    return sharedBrowser;
+  }
+  sharedBrowser = await chromium.launch();
+  return sharedBrowser;
+}
+
+/** Close the warm browser (called on graceful shutdown). */
+export async function closeRenderBrowser(): Promise<void> {
+  const browser = sharedBrowser;
+  sharedBrowser = null;
+  if (browser) {
+    try {
+      await browser.close();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 export async function renderRouteToVideo(
   routeConfig: RouteConfig,
   options: RenderRouteToVideoOptions
@@ -42,13 +67,13 @@ export async function renderRouteToVideo(
     providerRegistry ? { providerRegistry } : {}
   );
 
-  let browser: Browser | undefined;
+  let page: Page | undefined;
   let ffmpegProcess: ChildProcess | undefined;
   let ffmpegExited = false;
 
   try {
-    browser = await chromium.launch();
-    const page: Page = await browser.newPage({
+    const browser = await getBrowser();
+    page = await browser.newPage({
       viewport: {
         width: Number(route.width ?? 1920),
         height: Number(route.height ?? 1080)
@@ -205,8 +230,13 @@ export async function renderRouteToVideo(
       ffmpegProcess.kill("SIGKILL");
     }
 
-    if (browser) {
-      await browser.close();
+    // Close the page but keep the browser warm for the next job.
+    if (page) {
+      try {
+        await page.close();
+      } catch {
+        /* ignore */
+      }
     }
 
     await sleep(150);

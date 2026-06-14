@@ -8,7 +8,7 @@ import { createPresetStore } from "../lib/presets/store.js";
 import { createProviderRegistry } from "../lib/providers/index.js";
 import { createRenderQueue } from "../lib/render/queue.js";
 import { createRenderAssetHandler, safeResolve } from "../lib/render/asset-handler.js";
-import { renderRouteToVideo } from "../lib/render/video.js";
+import { renderRouteToVideo, closeRenderBrowser } from "../lib/render/video.js";
 import { prepareRoute } from "../lib/routes.js";
 import { parseTrack } from "../lib/parse-track.js";
 import { createTileCache } from "../lib/tile-cache.js";
@@ -587,6 +587,7 @@ function registerLifecycle(): void {
         queue.cancel(job.id);
       }
     }
+    void closeRenderBrowser();
     metricsCollector.stop();
     clearInterval(retentionTimer);
     setTimeout(() => process.exit(0), 1500).unref();
