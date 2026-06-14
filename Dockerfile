@@ -22,8 +22,8 @@ RUN npm test \
     && npm run build:renderer \
     && npm run build:webapp \
     && npm run build:admin \
+    && npm run build:server \
     && npm prune --omit=dev \
-    && npm install tsx \
     && npm cache clean --force
 
 ENV NODE_ENV=production
@@ -31,4 +31,4 @@ ENV NODE_ENV=production
 EXPOSE 5173
 EXPOSE 5174
 
-CMD ["node", "--import", "tsx", "server/index.ts"]
+CMD ["node", "dist/server/index.js"]

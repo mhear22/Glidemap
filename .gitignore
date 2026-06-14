@@ -3,6 +3,7 @@
 
 # Build output
 /webapp/dist/
+/dist/
 /adminapp/dist/
 /web/renderer.js
 /*.tsbuildinfo

@@ -1,7 +1,6 @@
 import fs from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import type { JobSummary, RenderJob, RenderProgress, RouteConfig, SerializedJob } from "../types/index.js";
 import type { PresetSaveRequest } from "../types/index.js";
 import { createPresetStore } from "../lib/presets/store.js";
@@ -35,9 +34,11 @@ class HttpError extends Error {
 const MAX_BODY_BYTES = Math.max(1, Number(process.env["MAX_BODY_MB"] ?? 8)) * 1024 * 1024;
 const MAX_QUEUE_DEPTH = Math.max(1, Number(process.env["MAX_QUEUE_DEPTH"] ?? 20));
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const rootDir = path.resolve(__dirname, "..");
+// Resolve assets/output relative to the working directory so the server works
+// both run-from-source (tsx) and precompiled (node dist/server/index.js).
+const rootDir = process.env["MAPANIM_ROOT"]
+  ? path.resolve(process.env["MAPANIM_ROOT"])
+  : process.cwd();
 const webDir = path.join(rootDir, "web");
 const webappDistDir = path.join(rootDir, "webapp", "dist");
 const adminappDistDir = path.join(rootDir, "adminapp", "dist");
@@ -243,120 +244,152 @@ function requestOrigin(request: http.IncomingMessage): string {
   return renderOrigin ?? "http://127.0.0.1";
 }
 
+async function handleSearch(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
+  const requested = new URL(request.url ?? "/", requestOrigin(request));
+  const query = requested.searchParams.get("q")?.trim();
+  const providerName = requested.searchParams.get("provider") ?? providerRegistry.defaultProvider;
+
+  if (!query) {
+    sendJson(response, 200, { results: [] });
+    return;
+  }
+
+  const provider = providerRegistry.getProvider(providerName);
+  const results = await provider.search(query, { limit: 5 });
+  metricsCollector.recordSearch();
+  sendJson(response, 200, { results });
+}
+
+async function handlePreview(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
+  const body = await readRequestRecord(request);
+  const route = await prepareRoute(parseRouteConfig(body["route"] ?? body), { providerRegistry });
+  sendJson(response, 200, { route });
+}
+
+async function handleImportTrack(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
+  const body = await readRequestRecord(request);
+  const text = parseOptionalString(body["text"]);
+  if (!text) {
+    throw new HttpError(400, "Provide GPX or KML text in the 'text' field");
+  }
+  let track: ReturnType<typeof parseTrack>;
+  try {
+    track = parseTrack(text);
+  } catch (error) {
+    throw new HttpError(400, toError(error).message);
+  }
+  sendJson(response, 200, { path: track });
+}
+
+async function handleListPresets(_request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
+  const presets = await presetStore.list();
+  sendJson(response, 200, { presets });
+}
+
+async function handleGetPreset(_request: http.IncomingMessage, response: http.ServerResponse, pathname: string): Promise<void> {
+  const id = decodeURIComponent(pathname.replace("/api/presets/", ""));
+  const preset = await presetStore.get(id);
+  sendJson(response, 200, preset);
+}
+
+async function handleSavePreset(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
+  const body = await readRequestRecord(request);
+  const route = parseRouteConfig(body["route"]);
+  const name = parseOptionalString(body["name"]);
+  const payload: PresetSaveRequest = name === undefined ? { route } : { name, route };
+  const saved = await presetStore.save(payload);
+  sendJson(response, 200, saved);
+}
+
+function handleListJobs(_request: http.IncomingMessage, response: http.ServerResponse): void {
+  sendJson(response, 200, { jobs: queue.list().map(serializeJob) });
+}
+
+async function handleEnqueue(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
+  const active = queue.list().filter((job) => job.status === "queued" || job.status === "running").length;
+  if (active >= MAX_QUEUE_DEPTH) {
+    throw new HttpError(429, "Render queue is full — wait for jobs to finish and try again.");
+  }
+  const body = await readRequestRecord(request);
+  const job = queue.enqueue({ route: parseRouteConfig(body["route"] ?? body) });
+  sendJson(response, 202, { job: serializeJob(job) });
+}
+
+function handleCancelJob(_request: http.IncomingMessage, response: http.ServerResponse, pathname: string): void {
+  const jobId = decodeURIComponent(pathname.replace("/api/render-jobs/", ""));
+  const cancelled = queue.cancel(jobId);
+  if (!cancelled) {
+    sendJson(response, 404, { error: "Job not found or not cancellable" });
+    return;
+  }
+  sendJson(response, 200, { cancelled: true });
+}
+
+async function handleMetrics(_request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
+  const metrics = await metricsCollector.getMetrics("24h");
+  sendJson(response, 200, metrics);
+}
+
+function handleEvents(request: http.IncomingMessage, response: http.ServerResponse): void {
+  response.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive"
+  });
+  response.write(`data: ${JSON.stringify({ jobs: queue.list().map(serializeJob) })}\n\n`);
+  sseClients.add(response);
+  request.on("close", () => {
+    sseClients.delete(response);
+  });
+}
+
+type ApiRouteHandler = (
+  request: http.IncomingMessage,
+  response: http.ServerResponse,
+  pathname: string
+) => Promise<void> | void;
+
+interface ApiRoute {
+  method: string;
+  exact?: string;
+  prefix?: string;
+  handler: ApiRouteHandler;
+}
+
+const apiRoutes: ApiRoute[] = [
+  { method: "GET", exact: "/api/search", handler: handleSearch },
+  { method: "POST", exact: "/api/preview", handler: handlePreview },
+  { method: "POST", exact: "/api/import-track", handler: handleImportTrack },
+  { method: "GET", exact: "/api/presets", handler: handleListPresets },
+  { method: "POST", exact: "/api/presets", handler: handleSavePreset },
+  { method: "GET", prefix: "/api/presets/", handler: handleGetPreset },
+  { method: "GET", exact: "/api/render-jobs", handler: handleListJobs },
+  { method: "POST", exact: "/api/render-jobs", handler: handleEnqueue },
+  { method: "DELETE", prefix: "/api/render-jobs/", handler: handleCancelJob },
+  { method: "GET", exact: "/api/metrics", handler: handleMetrics },
+  { method: "GET", exact: "/api/render-events", handler: handleEvents }
+];
+
+function routeMatchesPath(route: ApiRoute, pathname: string): boolean {
+  return route.exact !== undefined ? route.exact === pathname : pathname.startsWith(route.prefix ?? "\0");
+}
+
 async function handleApi(request: http.IncomingMessage, response: http.ServerResponse, pathname: string): Promise<boolean> {
-  if (request.method === "GET" && pathname === "/api/search") {
-    const requested = new URL(request.url ?? "/", requestOrigin(request));
-    const query = requested.searchParams.get("q")?.trim();
-    const providerName = requested.searchParams.get("provider") ?? providerRegistry.defaultProvider;
+  const pathMatches = apiRoutes.filter((route) => routeMatchesPath(route, pathname));
+  if (pathMatches.length === 0) {
+    return false; // unknown API path — caller returns 404
+  }
 
-    if (!query) {
-      sendJson(response, 200, { results: [] });
-      return true;
-    }
-
-    const provider = providerRegistry.getProvider(providerName);
-    const results = await provider.search(query, { limit: 5 });
-    metricsCollector.recordSearch();
-    sendJson(response, 200, { results });
+  const route = pathMatches.find((candidate) => candidate.method === request.method);
+  if (!route) {
+    const allowed = [...new Set(pathMatches.map((match) => match.method))].join(", ");
+    response.setHeader("Allow", allowed);
+    sendJson(response, 405, { error: `Method not allowed; allowed: ${allowed}` });
     return true;
   }
 
-  if (request.method === "POST" && pathname === "/api/preview") {
-    const body = await readRequestRecord(request);
-    const route = await prepareRoute(parseRouteConfig(body["route"] ?? body), { providerRegistry });
-    sendJson(response, 200, { route });
-    return true;
-  }
-
-  if (request.method === "POST" && pathname === "/api/import-track") {
-    const body = await readRequestRecord(request);
-    const text = parseOptionalString(body["text"]);
-    if (!text) {
-      throw new HttpError(400, "Provide GPX or KML text in the 'text' field");
-    }
-    let track: ReturnType<typeof parseTrack>;
-    try {
-      track = parseTrack(text);
-    } catch (error) {
-      throw new HttpError(400, toError(error).message);
-    }
-    sendJson(response, 200, { path: track });
-    return true;
-  }
-
-  if (request.method === "GET" && pathname === "/api/presets") {
-    const presets = await presetStore.list();
-    sendJson(response, 200, { presets });
-    return true;
-  }
-
-  if (request.method === "GET" && pathname.startsWith("/api/presets/")) {
-    const id = decodeURIComponent(pathname.replace("/api/presets/", ""));
-    const preset = await presetStore.get(id);
-    sendJson(response, 200, preset);
-    return true;
-  }
-
-  if (request.method === "POST" && pathname === "/api/presets") {
-    const body = await readRequestRecord(request);
-    const route = parseRouteConfig(body["route"]);
-    const name = parseOptionalString(body["name"]);
-    const payload: PresetSaveRequest = name === undefined ? { route } : { name, route };
-    const saved = await presetStore.save(payload);
-    sendJson(response, 200, saved);
-    return true;
-  }
-
-  if (request.method === "GET" && pathname === "/api/render-jobs") {
-    sendJson(response, 200, { jobs: queue.list().map(serializeJob) });
-    return true;
-  }
-
-  if (request.method === "POST" && pathname === "/api/render-jobs") {
-    const active = queue.list().filter((j) => j.status === "queued" || j.status === "running").length;
-    if (active >= MAX_QUEUE_DEPTH) {
-      throw new HttpError(429, "Render queue is full — wait for jobs to finish and try again.");
-    }
-    const body = await readRequestRecord(request);
-    const job = queue.enqueue({
-      route: parseRouteConfig(body["route"] ?? body)
-    });
-    sendJson(response, 202, { job: serializeJob(job) });
-    return true;
-  }
-
-  if (request.method === "DELETE" && pathname.startsWith("/api/render-jobs/")) {
-    const jobId = decodeURIComponent(pathname.replace("/api/render-jobs/", ""));
-    const cancelled = queue.cancel(jobId);
-    if (!cancelled) {
-      sendJson(response, 404, { error: "Job not found or not cancellable" });
-      return true;
-    }
-    sendJson(response, 200, { cancelled: true });
-    return true;
-  }
-
-  if (request.method === "GET" && pathname === "/api/metrics") {
-    const metrics = await metricsCollector.getMetrics("24h");
-    sendJson(response, 200, metrics);
-    return true;
-  }
-
-  if (request.method === "GET" && pathname === "/api/render-events") {
-    response.writeHead(200, {
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive"
-    });
-    response.write(`data: ${JSON.stringify({ jobs: queue.list().map(serializeJob) })}\n\n`);
-    sseClients.add(response);
-    request.on("close", () => {
-      sseClients.delete(response);
-    });
-    return true;
-  }
-
-  return false;
+  await route.handler(request, response, pathname);
+  return true;
 }
 
 async function serveFile(response: http.ServerResponse, filePath: string): Promise<void> {
