@@ -42,6 +42,7 @@ function createDefaultRoute(): RouteFormData {
     height: 1080,
     fps: 30,
     durationSeconds: 8,
+    format: "mp4",
     overviewPadding: 180,
     output: "",
     start: { label: "", query: "", coords: null },
@@ -301,6 +302,27 @@ const avatarBgTransparent = computed({
   get: () => !route.avatarBgColor,
   set: (v: boolean) => { route.avatarBgColor = v ? "" : "#ffffff"; }
 });
+
+const resolutionPresets: Record<string, [number, number]> = {
+  "1080p-landscape": [1920, 1080],
+  "1080p-portrait": [1080, 1920],
+  "1080-square": [1080, 1080],
+  "4k-landscape": [3840, 2160]
+};
+const resolutionPreset = computed<string>(() => {
+  const key = `${route.width}x${route.height}`;
+  for (const [name, [w, h]] of Object.entries(resolutionPresets)) {
+    if (key === `${w}x${h}`) return name;
+  }
+  return "custom";
+});
+function applyResolution(value: string): void {
+  const dims = resolutionPresets[value];
+  if (dims) {
+    route.width = dims[0];
+    route.height = dims[1];
+  }
+}
 
 const appVersion = __APP_VERSION__;
 const sidebarOpen = ref(false);
@@ -1062,6 +1084,25 @@ onBeforeUnmount(() => {
                 <option :value="true">On</option>
               </select>
             </label>
+            <div class="field-row">
+              <label class="field">
+                <span class="field-label">Resolution</span>
+                <select :value="resolutionPreset" class="select-input" @change="applyResolution(($event.target as HTMLSelectElement).value)">
+                  <option value="1080p-landscape">1080p &middot; 16:9</option>
+                  <option value="1080p-portrait">1080&times;1920 &middot; 9:16</option>
+                  <option value="1080-square">1080&sup2; &middot; 1:1</option>
+                  <option value="4k-landscape">4K &middot; 16:9</option>
+                  <option value="custom" disabled>Custom ({{ route.width }}&times;{{ route.height }})</option>
+                </select>
+              </label>
+              <label class="field">
+                <span class="field-label">Format</span>
+                <select v-model="route.format" class="select-input">
+                  <option value="mp4">MP4 (H.264)</option>
+                  <option value="webm">WebM (VP9)</option>
+                </select>
+              </label>
+            </div>
           </div>
         </div>
       </div>

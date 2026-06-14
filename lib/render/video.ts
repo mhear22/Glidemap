@@ -108,19 +108,22 @@ export async function renderRouteToVideo(
     const durationSeconds = Number(route.durationSeconds ?? 8);
     const totalFrames = Math.max(2, Math.round(fps * durationSeconds));
 
-    const output = `output/${crypto.randomUUID()}.mp4`;
+    const format = route.format === "webm" ? "webm" : "mp4";
+    const output = `output/${crypto.randomUUID()}.${format}`;
     route.output = output;
     await ensureOutputDir(rootDir, output);
     const outputPath = path.resolve(rootDir, output);
+
+    const codecArgs = format === "webm"
+      ? ["-c:v", "libvpx-vp9", "-pix_fmt", "yuv420p", "-b:v", "0", "-crf", "32", "-row-mt", "1"]
+      : ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart"];
 
     const ffmpegArgs = [
       "-y",
       "-f", "image2pipe",
       "-framerate", String(fps),
       "-i", "pipe:0",
-      "-c:v", "libx264",
-      "-pix_fmt", "yuv420p",
-      "-movflags", "+faststart",
+      ...codecArgs,
       outputPath
     ];
 

@@ -57,6 +57,7 @@ export interface RouteFormData {
   height: number;
   fps: number;
   durationSeconds: number;
+  format: "mp4" | "webm";
   overviewPadding: number;
   output: string;
   start: FormLocation;
