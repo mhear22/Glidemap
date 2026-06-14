@@ -154,6 +154,7 @@ onBeforeUnmount(() => {
       <line class="curve-guide" :x1="handlePoint.x" :x2="handlePoint.x" :y1="handlePoint.y" :y2="height - margin.bottom" />
       <circle class="curve-anchor" :cx="startPoint.x" :cy="startPoint.y" r="5" />
       <circle class="curve-anchor" :cx="endPoint.x" :cy="endPoint.y" r="5" />
+      <circle class="curve-handle-hit" :cx="handlePoint.x" :cy="handlePoint.y" r="16" fill="transparent" @pointerdown.prevent="startDrag($event)" />
       <circle class="curve-handle control" :cx="handlePoint.x" :cy="handlePoint.y" r="7" @pointerdown.prevent="startDrag($event)" />
       <circle class="curve-current" :cx="currentPoint.x" :cy="currentPoint.y" r="4" />
       <text class="curve-text" :x="margin.left" :y="height - 10">0%</text>
@@ -164,3 +165,20 @@ onBeforeUnmount(() => {
     <div class="curve-note">Drag the handle to adjust easing. Diagonal = linear speed.</div>
   </div>
 </template>
+
+<style scoped>
+/* Invisible larger touch target behind the visible drag handle. */
+.curve-handle-hit {
+  cursor: grab;
+}
+
+.curve-handle-hit:active {
+  cursor: grabbing;
+}
+
+@media (pointer: coarse) {
+  .curve-handle-hit {
+    r: 22px;
+  }
+}
+</style>
