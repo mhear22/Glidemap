@@ -13,3 +13,4 @@ test-results
 .env
 .env.*
 presets/*.json
+.queue-state.json

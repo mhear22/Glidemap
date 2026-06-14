@@ -218,7 +218,8 @@ const queue = createRenderQueue({
       providerRegistry,
       onProgress: emitProgress,
       signal
-    })
+    }),
+  persistPath: path.join(rootDir, ".queue-state.json")
 });
 
 queue.subscribe(() => {

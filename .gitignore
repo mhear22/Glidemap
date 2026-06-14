@@ -35,3 +35,6 @@ pnpm-debug.log*
 # OS/editor noise
 .DS_Store
 Thumbs.db
+
+# render queue persistence (runtime state)
+.queue-state.json
