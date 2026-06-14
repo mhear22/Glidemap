@@ -192,21 +192,32 @@ const saveModalInput = ref<HTMLInputElement | null>(null);
 const queueWrapRef = ref<HTMLDivElement | null>(null);
 const infoWrapRef = ref<HTMLDivElement | null>(null);
 
+interface ToastAction {
+  label: string;
+  run: () => void;
+}
+
 interface Toast {
   id: number;
   message: string;
   type: "success" | "error" | "info";
+  action?: ToastAction;
 }
 
 const toasts = ref<Toast[]>([]);
 let toastId = 0;
 
-function notify(message: string, type: Toast["type"] = "info"): void {
+function notify(message: string, type: Toast["type"] = "info", action?: ToastAction): void {
   const id = ++toastId;
-  toasts.value.push({ id, message, type });
+  toasts.value.push({ id, message, type, action });
   window.setTimeout(() => {
     toasts.value = toasts.value.filter((toast) => toast.id !== id);
-  }, type === "error" ? 6000 : 3500);
+  }, type === "error" || action ? 6000 : 3500);
+}
+
+function runToastAction(toast: Toast): void {
+  toast.action?.run();
+  dismissToast(toast.id);
 }
 
 function dismissToast(id: number): void {
@@ -323,6 +334,7 @@ function maybeStartTour(): void {
 
 function enterStudio(): void {
   navigate("/studio");
+  if (!previewReady.value) sidebarOpen.value = true; // land on the route inputs
   maybeStartTour();
 }
 
@@ -351,7 +363,9 @@ function onTourChange(stepIndex: number): void {
 
 function onTourClose(): void {
   tourOpen.value = false;
-  sidebarOpen.value = false;
+  // Keep the route builder open when nothing is set up yet, so users (and anyone
+  // who taps Skip) land on the actual inputs rather than a blank map.
+  sidebarOpen.value = !previewReady.value;
   localStorage.setItem("mapanim-tour-done", "1");
 }
 const darkMode = ref(localStorage.getItem("theme") !== "light");
@@ -376,8 +390,11 @@ let previewTimer: ReturnType<typeof setTimeout> | undefined;
 let pollTimer: ReturnType<typeof setInterval> | undefined;
 const baseTitle = document.title;
 
-const previewReady = computed<boolean>(() => Boolean(route.start.query.trim() && route.end.query.trim()));
+// Gate preview/queue on RESOLVED coordinates, not raw typed text, so free-text
+// like "asdf" can't fire previews or queue garbage renders.
+const previewReady = computed<boolean>(() => Boolean(route.start.coords && route.end.coords));
 const canQueueRender = computed<boolean>(() => previewReady.value);
+const hasLocationText = computed<boolean>(() => Boolean(route.start.query.trim() || route.end.query.trim()));
 const routeSummaryLabel = computed<string>(() => route.name || route.id || "Untitled route");
 const previewLocationLabel = computed<string>(() => {
   if (!previewRoute.value) return "";
@@ -392,7 +409,14 @@ const previewLocationLabel = computed<string>(() => {
   return `${startLabel} \u2192 ${endLabel}`;
 });
 const previewStatus = computed<{ text: string; type: string }>(() => {
-  if (!previewReady.value) return { text: "Enter both locations to load a preview", type: "neutral" };
+  if (!previewReady.value) {
+    return {
+      text: hasLocationText.value
+        ? "Pick a result for each location to load a preview"
+        : "Enter both locations to load a preview",
+      type: "neutral"
+    };
+  }
   if (previewError.value) return { text: previewError.value, type: "error" };
   if (previewLoading.value) return { text: "Syncing preview\u2026", type: "syncing" };
   return previewRoute.value
@@ -574,8 +598,19 @@ function resetRoute(): void {
 }
 
 function confirmReset(): void {
+  const snapshot = JSON.parse(JSON.stringify(route)) as RouteFormData;
+  const previousPreset = presetName.value;
   resetRoute();
   resetModalOpen.value = false;
+  notify("Route reset.", "info", {
+    label: "Undo",
+    run: () => {
+      applyRoute(snapshot);
+      presetName.value = previousPreset;
+      previewProgress.value = 0;
+      schedulePreview(0);
+    }
+  });
 }
 
 function applySearchResult(kind: "start" | "end", result: ProviderSearchResult): void {
@@ -692,6 +727,35 @@ function closeTopmostOverlay(): boolean {
   return false;
 }
 
+// --- inline-modal accessibility: focus into the dialog, trap Tab, restore on close ---
+const anyInlineModalOpen = computed<boolean>(
+  () => saveModalOpen.value || loadModalOpen.value || resetModalOpen.value || avatarModalOpen.value
+);
+let modalReturnFocus: HTMLElement | null = null;
+let modalTabHandler: ((e: KeyboardEvent) => void) | null = null;
+
+function modalFocusables(el: HTMLElement): HTMLElement[] {
+  return Array.from(
+    el.querySelectorAll<HTMLElement>(
+      'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'
+    )
+  ).filter((n) => n.offsetParent !== null || n === document.activeElement);
+}
+
+watch(anyInlineModalOpen, (open: boolean) => {
+  if (open) {
+    modalReturnFocus = document.activeElement as HTMLElement | null;
+    nextTick(() => {
+      const modal = document.querySelector<HTMLElement>(".modal-backdrop .modal");
+      if (!modal) return;
+      (modalFocusables(modal)[0] ?? modal).focus();
+    });
+  } else if (modalReturnFocus) {
+    modalReturnFocus.focus();
+    modalReturnFocus = null;
+  }
+});
+
 onMounted(async () => {
   await Promise.all([loadPresets(), loadJobs()]);
   events = new EventSource("/api/render-events");
@@ -719,12 +783,34 @@ onMounted(async () => {
     }
   };
   document.addEventListener("keydown", escapeHandler);
+  modalTabHandler = (e) => {
+    if (e.key !== "Tab" || !anyInlineModalOpen.value) return;
+    const modal = document.querySelector<HTMLElement>(".modal-backdrop .modal");
+    if (!modal) return;
+    const focusable = modalFocusables(modal);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement as HTMLElement | null;
+    if (e.shiftKey && (active === first || !modal.contains(active))) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && (active === last || !modal.contains(active))) {
+      e.preventDefault();
+      first.focus();
+    }
+  };
+  document.addEventListener("keydown", modalTabHandler);
   popStateHandler = () => {
     showLanding.value = window.location.pathname !== "/studio";
   };
   window.addEventListener("popstate", popStateHandler);
   if (!showLanding.value) {
-    maybeStartTour();
+    if (localStorage.getItem("mapanim-tour-done") === "1") {
+      if (!previewReady.value) sidebarOpen.value = true; // returning users land on the inputs
+    } else {
+      maybeStartTour();
+    }
   }
 });
 
@@ -739,13 +825,15 @@ onBeforeUnmount(() => {
   if (visibilityChangeHandler) document.removeEventListener("visibilitychange", visibilityChangeHandler);
   if (clickOutsideHandler) document.removeEventListener("click", clickOutsideHandler);
   if (escapeHandler) document.removeEventListener("keydown", escapeHandler);
+  if (modalTabHandler) document.removeEventListener("keydown", modalTabHandler);
   if (popStateHandler) window.removeEventListener("popstate", popStateHandler);
 });
 </script>
 
 <template>
-  <LandingPage v-if="showLanding" @enter="enterStudio" @guide="openGuideFromLanding" />
+  <LandingPage v-if="showLanding" @enter="enterStudio" @guide="openGuideFromLanding" @toggle-theme="darkMode = !darkMode" />
   <div v-else class="app-shell">
+    <a class="skip-link" href="#main-content">Skip to preview</a>
     <!-- Header -->
     <header class="app-header">
       <div class="app-logo">
@@ -827,7 +915,7 @@ onBeforeUnmount(() => {
             <label class="field">
               <span class="field-label">Avatar marker</span>
               <div class="avatar-upload-row">
-                <button v-if="avatarPreviewUrl" type="button" class="avatar-preview-wrap" @click="avatarModalOpen = true" title="Edit avatar">
+                <button v-if="avatarPreviewUrl" type="button" class="avatar-preview-wrap" @click="avatarModalOpen = true" title="Edit avatar" aria-label="Edit avatar">
                   <img :src="avatarPreviewUrl" class="avatar-preview-thumb" alt="Avatar" />
                 </button>
                 <label v-else class="avatar-upload-btn">
@@ -909,15 +997,15 @@ onBeforeUnmount(() => {
           <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">
             <label class="field">
               <span class="field-label">Duration (s)</span>
-              <input v-model.number="route.durationSeconds" class="text-input" type="number" min="4" max="20" step="0.5" />
+              <input v-model.number="route.durationSeconds" class="text-input" type="number" inputmode="decimal" min="4" max="20" step="0.5" />
             </label>
             <label class="field">
               <span class="field-label">Smoothing</span>
-              <input v-model.number="route.camera.smoothing" class="text-input" type="number" min="0" max="1" step="0.01" />
+              <input v-model.number="route.camera.smoothing" class="text-input" type="number" inputmode="decimal" min="0" max="1" step="0.01" />
             </label>
             <label class="field">
               <span class="field-label">Lerp aggressiveness</span>
-              <input v-model.number="route.camera.aggressiveness" class="text-input" type="number" min="0" max="100" step="1" />
+              <input v-model.number="route.camera.aggressiveness" class="text-input" type="number" inputmode="numeric" min="0" max="100" step="1" />
             </label>
             <label class="field">
               <span class="field-label">Clip path to camera</span>
@@ -933,13 +1021,15 @@ onBeforeUnmount(() => {
       <!-- Persistent bottom panel -->
       <div class="sidebar-panel">
         <div class="sidebar-panel-actions" data-tour="queue">
-          <button type="button" class="btn btn-primary sidebar-panel-btn" :disabled="!canQueueRender" @click="queueRender">
+          <button type="button" class="btn btn-primary sidebar-panel-btn" :disabled="!canQueueRender" :title="canQueueRender ? 'Queue render' : 'Set an origin and destination first'" @click="queueRender">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3" /></svg>
             Queue
           </button>
-          <button type="button" class="btn sidebar-panel-btn" @click="openSaveModal">Save</button>
-          <button type="button" class="btn sidebar-panel-btn" @click="loadModalOpen = true">Load</button>
-          <button type="button" class="btn btn-danger sidebar-panel-btn" @click="resetModalOpen = true" title="Reset route">
+          <button type="button" class="btn sidebar-panel-btn" :class="{ active: !!presetName }" @click="openSaveModal">Save</button>
+          <button type="button" class="btn sidebar-panel-btn" :class="{ active: !!presetName }" @click="loadModalOpen = true">
+            Load<span v-if="presets.length" class="preset-count-badge">{{ presets.length }}</span>
+          </button>
+          <button type="button" class="btn btn-danger sidebar-panel-btn" @click="resetModalOpen = true" title="Reset route" aria-label="Reset route">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 102.13-9.36L1 10" /></svg>
           </button>
         </div>
@@ -947,7 +1037,7 @@ onBeforeUnmount(() => {
     </aside>
 
     <!-- Main workspace -->
-    <main class="workspace">
+    <main id="main-content" class="workspace">
       <RenderPreview :route="previewScene" :progress="previewProgress" />
 
       <!-- Overlay controls on top of preview -->
@@ -989,7 +1079,7 @@ onBeforeUnmount(() => {
                 <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="5" y="3" width="4" height="18" /><rect x="15" y="3" width="4" height="18" /></svg>
               </button>
             </div>
-            <input id="preview-progress" v-model.number="previewProgress" type="range" min="0" max="1" step="0.01" aria-label="Preview position" @input="stopPlayback" />
+            <input id="preview-progress" v-model.number="previewProgress" type="range" min="0" max="1" step="0.01" aria-label="Preview position" :aria-valuetext="Math.round(previewProgress * 100) + '%'" @input="stopPlayback" />
             <strong>{{ Math.round(previewProgress * 100) }}%</strong>
           </div>
         </div>
@@ -999,7 +1089,7 @@ onBeforeUnmount(() => {
     <!-- Save Preset Modal -->
     <Teleport to="body">
       <div v-if="saveModalOpen" class="modal-backdrop" @click.self="saveModalOpen = false">
-        <div class="modal" role="dialog" aria-modal="true" aria-label="Save preset">
+        <div class="modal" role="dialog" aria-modal="true" aria-label="Save preset" tabindex="-1">
           <h3 class="modal-title">Save Preset</h3>
           <label class="field">
             <span class="field-label">Preset name</span>
@@ -1020,7 +1110,7 @@ onBeforeUnmount(() => {
 
       <!-- Load Preset Modal -->
       <div v-if="loadModalOpen" class="modal-backdrop" @click.self="loadModalOpen = false">
-        <div class="modal" role="dialog" aria-modal="true" aria-label="Load preset">
+        <div class="modal" role="dialog" aria-modal="true" aria-label="Load preset" tabindex="-1">
           <h3 class="modal-title">Load Preset</h3>
           <div v-if="!presets.length" class="field-hint" style="padding:8px 0;">No presets saved yet.</div>
           <div v-else class="modal-preset-list">
@@ -1043,7 +1133,7 @@ onBeforeUnmount(() => {
 
       <!-- Reset Confirmation Modal -->
       <div v-if="resetModalOpen" class="modal-backdrop" @click.self="resetModalOpen = false">
-        <div class="modal" role="dialog" aria-modal="true" aria-label="Reset route">
+        <div class="modal" role="dialog" aria-modal="true" aria-label="Reset route" tabindex="-1">
           <h3 class="modal-title">Reset Route</h3>
           <p style="font-size:13px;color:var(--text-secondary);">This will clear all route fields and return to defaults. Are you sure?</p>
           <div class="modal-actions">
@@ -1055,7 +1145,7 @@ onBeforeUnmount(() => {
 
       <!-- Avatar Config Modal -->
       <div v-if="avatarModalOpen" class="modal-backdrop" @click.self="avatarModalOpen = false">
-        <div class="modal" role="dialog" aria-modal="true" aria-label="Avatar settings">
+        <div class="modal" role="dialog" aria-modal="true" aria-label="Avatar settings" tabindex="-1">
           <h3 class="modal-title">Avatar Settings</h3>
           <div class="avatar-modal-preview">
             <img v-if="avatarPreviewUrl" :src="avatarPreviewUrl" alt="Avatar preview"
@@ -1080,28 +1170,28 @@ onBeforeUnmount(() => {
           <div class="field-row">
             <label class="field">
               <span class="field-label">Scale</span>
-              <input v-model.number="route.avatarScale" class="text-input" type="number" min="0.5" max="2" step="0.1" />
+              <input v-model.number="route.avatarScale" class="text-input" type="number" inputmode="decimal" min="0.5" max="2" step="0.1" />
             </label>
             <label class="field">
               <span class="field-label">Border width</span>
-              <input v-model.number="route.avatarBorderWidth" class="text-input" type="number" min="0" max="6" step="0.5" />
+              <input v-model.number="route.avatarBorderWidth" class="text-input" type="number" inputmode="decimal" min="0" max="6" step="0.5" />
             </label>
           </div>
           <label class="field">
             <span class="field-label">Border color</span>
             <input v-model="route.avatarBorderColor" class="text-input" type="color" />
           </label>
-          <label class="field">
-            <span class="field-label">Background</span>
+          <fieldset class="field avatar-bg-fieldset">
+            <legend class="field-label">Background</legend>
             <div class="avatar-bg-row">
-              <input v-model="route.avatarBgColor" class="text-input" type="color" :disabled="avatarBgTransparent" />
+              <input v-model="route.avatarBgColor" class="text-input" type="color" :disabled="avatarBgTransparent" aria-label="Background color" />
               <label class="avatar-transparent-toggle">
                 <input type="checkbox" v-model="avatarBgTransparent" />
                 <span>Transparent</span>
               </label>
             </div>
             <span class="field-hint">For images with transparent backgrounds</span>
-          </label>
+          </fieldset>
           <div class="modal-actions">
             <button type="button" class="btn btn-danger" @click="clearAvatar(); avatarModalOpen = false">Remove</button>
             <button type="button" class="btn btn-primary" @click="avatarModalOpen = false">Done</button>
@@ -1128,9 +1218,17 @@ onBeforeUnmount(() => {
       <AppTour :open="tourOpen" :steps="tourSteps" @change="onTourChange" @close="onTourClose" />
 
       <!-- Toasts -->
-      <div class="toast-stack" role="status" aria-live="polite">
-        <div v-for="toast in toasts" :key="toast.id" class="toast" :class="`toast-${toast.type}`">
+      <div class="toast-stack">
+        <div
+          v-for="toast in toasts"
+          :key="toast.id"
+          class="toast"
+          :class="`toast-${toast.type}`"
+          :role="toast.type === 'error' ? 'alert' : 'status'"
+          :aria-live="toast.type === 'error' ? 'assertive' : 'polite'"
+        >
           <span class="toast-message">{{ toast.message }}</span>
+          <button v-if="toast.action" type="button" class="toast-action" @click="runToastAction(toast)">{{ toast.action.label }}</button>
           <button type="button" class="toast-dismiss" aria-label="Dismiss notification" @click="dismissToast(toast.id)">&times;</button>
         </div>
       </div>

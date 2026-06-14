@@ -232,10 +232,9 @@ onBeforeUnmount(() => {
 <template>
   <div class="curve-editor">
     <div class="curve-summary">
-      <div class="curve-summary-item editable" @click="editField = 'startZoom'">
+      <div v-if="editField === 'startZoom'" class="curve-summary-item editable">
         <div class="label">Start</div>
         <input
-          v-if="editField === 'startZoom'"
           ref="startZoomInput"
           :value="camera.startZoom"
           class="curve-inline-input"
@@ -247,12 +246,20 @@ onBeforeUnmount(() => {
           @keydown.enter="finishEdit('startZoom', $event)"
           @keydown.escape="editField = null"
         />
-        <div v-else class="value">{{ camera.startZoom.toFixed(1) }}x</div>
       </div>
-      <div class="curve-summary-item editable" @click="editField = 'maxAltitude'">
+      <button
+        v-else
+        type="button"
+        class="curve-summary-item editable"
+        aria-label="Edit start zoom"
+        @click="editField = 'startZoom'"
+      >
+        <div class="label">Start</div>
+        <div class="value">{{ camera.startZoom.toFixed(1) }}x</div>
+      </button>
+      <div v-if="editField === 'maxAltitude'" class="curve-summary-item editable">
         <div class="label">Farthest</div>
         <input
-          v-if="editField === 'maxAltitude'"
           ref="maxAltitudeInput"
           :value="camera.maxAltitude"
           class="curve-inline-input"
@@ -264,12 +271,20 @@ onBeforeUnmount(() => {
           @keydown.enter="finishEdit('maxAltitude', $event)"
           @keydown.escape="editField = null"
         />
-        <div v-else class="value">{{ peakZoom.toFixed(1) }}x @ {{ camera.maxAltitude }}%</div>
       </div>
-      <div class="curve-summary-item editable" @click="editField = 'endZoom'">
+      <button
+        v-else
+        type="button"
+        class="curve-summary-item editable"
+        aria-label="Edit farthest altitude"
+        @click="editField = 'maxAltitude'"
+      >
+        <div class="label">Farthest</div>
+        <div class="value">{{ peakZoom.toFixed(1) }}x @ {{ camera.maxAltitude }}%</div>
+      </button>
+      <div v-if="editField === 'endZoom'" class="curve-summary-item editable">
         <div class="label">End</div>
         <input
-          v-if="editField === 'endZoom'"
           ref="endZoomInput"
           :value="camera.endZoom"
           class="curve-inline-input"
@@ -281,8 +296,17 @@ onBeforeUnmount(() => {
           @keydown.enter="finishEdit('endZoom', $event)"
           @keydown.escape="editField = null"
         />
-        <div v-else class="value">{{ camera.endZoom.toFixed(1) }}x</div>
       </div>
+      <button
+        v-else
+        type="button"
+        class="curve-summary-item editable"
+        aria-label="Edit end zoom"
+        @click="editField = 'endZoom'"
+      >
+        <div class="label">End</div>
+        <div class="value">{{ camera.endZoom.toFixed(1) }}x</div>
+      </button>
     </div>
     <svg ref="svgRef" class="curve-canvas" :viewBox="`0 0 ${width} ${height}`">
       <rect class="curve-bg" :x="0" :y="0" :width="width" :height="height" />
@@ -296,6 +320,7 @@ onBeforeUnmount(() => {
       <circle class="curve-anchor" :cx="startPoint.x" :cy="startPoint.y" r="5" />
       <circle class="curve-anchor" :cx="peakPoint.x" :cy="peakPoint.y" r="5" />
       <circle class="curve-anchor" :cx="endPoint.x" :cy="endPoint.y" r="5" />
+      <circle class="curve-handle-hit" :cx="handlePoint.x" :cy="handlePoint.y" r="16" fill="transparent" @pointerdown.prevent="startDrag($event)" />
       <circle class="curve-handle control" :cx="handlePoint.x" :cy="handlePoint.y" r="7" @pointerdown.prevent="startDrag($event)" />
       <circle class="curve-current" :cx="currentPoint.x" :cy="currentPoint.y" r="4" />
       <text class="curve-text" :x="margin.left" :y="height - 10">Start</text>
@@ -307,3 +332,32 @@ onBeforeUnmount(() => {
     <div class="curve-note">Drag handle to adjust the zoom curve shape.</div>
   </div>
 </template>
+
+<style scoped>
+/* Reset UA button styling so the <button> variant of .curve-summary-item
+   stays pixel-identical to the original clickable div (global styles.css). */
+button.curve-summary-item {
+  display: block;
+  width: 100%;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+/* Invisible larger touch target behind the visible drag handle. */
+.curve-handle-hit {
+  cursor: grab;
+}
+
+.curve-handle-hit:active {
+  cursor: grabbing;
+}
+
+@media (pointer: coarse) {
+  .curve-handle-hit {
+    r: 22px;
+  }
+}
+</style>

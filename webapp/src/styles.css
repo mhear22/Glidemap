@@ -1,58 +1,5 @@
-:root {
-  --bg: #0e1117;
-  --surface: #161b22;
-  --surface-raised: #1c2129;
-  --surface-overlay: #21262d;
-  --line: #30363d;
-  --line-subtle: #21262d;
-  --input-border: #6e7681;
-  --text: #e6edf3;
-  --text-secondary: #8b949e;
-  --text-tertiary: #6e7681;
-  --primary: #3fb950;
-  --primary-hover: #2ea043;
-  --primary-muted: rgba(63, 185, 80, 0.15);
-  --accent: #58a6ff;
-  --accent-muted: rgba(88, 166, 255, 0.15);
-  --danger: #f85149;
-  --danger-muted: rgba(248, 81, 73, 0.15);
-  --warning: #d29922;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.5);
-  --transition-fast: 150ms ease;
-  --transition-base: 200ms ease;
-  --sidebar-width: 320px;
-  --header-height: 56px;
-}
-
-[data-theme="light"] {
-  --bg: #ffffff;
-  --surface: #f6f8fa;
-  --surface-raised: #ffffff;
-  --surface-overlay: #f0f2f5;
-  --line: #d0d7de;
-  --line-subtle: #e8ecf0;
-  --input-border: #8c959f;
-  --text: #1f2328;
-  --text-secondary: #656d76;
-  --text-tertiary: #8c959f;
-  --primary: #1a7f37;
-  --primary-hover: #116329;
-  --primary-muted: rgba(26, 127, 55, 0.12);
-  --accent: #0969da;
-  --accent-muted: rgba(9, 105, 218, 0.12);
-  --danger: #cf222e;
-  --danger-muted: rgba(207, 34, 46, 0.12);
-  --warning: #9a6700;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.08);
-  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.1);
-  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.12);
-}
+/* Design tokens (:root + [data-theme]) live in ../../shared/tokens.css,
+   imported in main.ts before this file. Single source of truth for both apps. */
 
 * {
   box-sizing: border-box;
@@ -168,14 +115,6 @@ a:hover {
   gap: 4px;
 }
 
-.sidebar-inner {
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex: 1;
-}
-
 /* ─── Sections / Panels ────────────────────────────────── */
 
 .section {
@@ -184,7 +123,7 @@ a:hover {
 }
 
 .section + .section {
-  margin-top: 4px;
+  margin-top: 14px;
 }
 
 .section-header {
@@ -234,12 +173,6 @@ a:hover {
 .field-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-
-.field-row-3 {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
   gap: 8px;
 }
 
@@ -735,16 +668,20 @@ a:hover {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  background: rgba(14, 17, 23, 0.85);
-  color: var(--text-tertiary);
+  gap: 14px;
+  text-align: center;
+  padding: 24px;
+  background:
+    radial-gradient(120% 80% at 50% 38%, rgba(88, 166, 255, 0.06), transparent 70%),
+    rgba(14, 17, 23, 0.85);
+  color: var(--text-secondary);
   font-size: 14px;
 }
 
 .preview-empty svg {
-  width: 40px;
-  height: 40px;
-  opacity: 0.4;
+  width: 48px;
+  height: 48px;
+  opacity: 0.6;
 }
 
 /* ─── Preview Overlay ─────────────────────────────────── */
@@ -1264,15 +1201,6 @@ a:hover {
   background: var(--surface);
 }
 
-.sidebar-panel-presets {
-  max-height: 200px;
-  overflow-y: auto;
-  margin-bottom: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
 .sidebar-panel-actions {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr 1fr;
@@ -1604,8 +1532,7 @@ a:hover {
 }
 
 @media (max-width: 600px) {
-  .field-row,
-  .field-row-3 {
+  .field-row {
     grid-template-columns: 1fr;
   }
 
@@ -1999,6 +1926,7 @@ a:hover {
 
 .landing-reel {
   margin-top: 40px;
+  position: relative;
 }
 
 .landing-reel video {
@@ -2022,22 +1950,11 @@ a:hover {
   gap: 10px;
 }
 
-.info-dropdown-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
 .info-version {
   font-size: 11px;
   font-weight: 500;
   color: var(--text-tertiary);
   font-variant-numeric: tabular-nums;
-}
-
-.landing-reel {
-  position: relative;
 }
 
 .landing-reel-toggle {
@@ -2057,4 +1974,111 @@ a:hover {
 
 .landing-reel-toggle:hover {
   background: rgba(0, 0, 0, 0.75);
+}
+
+/* ═══ Beta UI / accessibility fixes ═══════════════════════ */
+
+/* Visible keyboard focus everywhere (buttons, links, cards, range, etc.) */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+/* Inputs already show a box-shadow ring — avoid a doubled outline */
+.text-input:focus-visible,
+.select-input:focus-visible {
+  outline: none;
+}
+.timeline input[type="range"]:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 4px var(--primary-muted);
+}
+.timeline input[type="range"]:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 4px var(--primary-muted);
+}
+
+/* Skip-to-content link (visible on focus) */
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 500;
+  padding: 8px 14px;
+  border-radius: var(--radius-md);
+  background: var(--primary);
+  color: #0e1117;
+  font-weight: 600;
+  transform: translateY(-150%);
+  transition: transform var(--transition-fast);
+}
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+/* Toast action button (e.g. Undo) */
+.toast-action {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+.toast-action:hover {
+  background: var(--line);
+}
+
+/* Avatar "Background" group is now a <fieldset> — strip default chrome */
+.avatar-bg-fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.avatar-bg-fieldset > legend {
+  padding: 0;
+}
+
+/* Safe-area insets for bottom-anchored UI (viewport-fit=cover) */
+.preview-overlay-bottom {
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+}
+.toast-stack {
+  bottom: calc(16px + env(safe-area-inset-bottom));
+}
+.sidebar-panel {
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+}
+
+/* Bigger touch targets on coarse pointers */
+@media (pointer: coarse) {
+  .app-header .btn-sm {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .play-btn {
+    width: 44px;
+    height: 44px;
+  }
+  .timeline input[type="range"]::-webkit-slider-thumb {
+    width: 24px;
+    height: 24px;
+  }
+  .timeline input[type="range"]::-moz-range-thumb {
+    width: 24px;
+    height: 24px;
+  }
+}
+
+/* Respect reduced-motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

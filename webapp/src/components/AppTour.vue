@@ -32,11 +32,15 @@ const viewport = ref({ width: window.innerWidth, height: window.innerHeight });
 const currentStep = computed(() => props.steps[index.value] ?? null);
 const isLast = computed(() => index.value >= props.steps.length - 1);
 
-const CARD_WIDTH = 320;
+// Fallback used only before the card has been measured for the first time.
+const CARD_WIDTH_FALLBACK = 320;
 const GAP = 12;
 
-// Measured after each render; the fallback only applies before first measure.
+// Measured after each render; the fallbacks only apply before first measure.
 const cardHeight = ref(190);
+// Effective card width is content/CSS-driven (the CSS shrinks it below 380px),
+// so we read it from the real element instead of trusting a hardcoded constant.
+const cardWidth = ref(CARD_WIDTH_FALLBACK);
 
 const cardStyle = computed<Record<string, string>>(() => {
   const { width: viewportWidth, height: viewportHeight } = viewport.value;
@@ -44,11 +48,11 @@ const cardStyle = computed<Record<string, string>>(() => {
   if (!rect) {
     return {
       top: `${Math.round(viewportHeight / 2 - cardHeight.value / 2)}px`,
-      left: `${Math.round(viewportWidth / 2 - CARD_WIDTH / 2)}px`
+      left: `${Math.round(viewportWidth / 2 - cardWidth.value / 2)}px`
     };
   }
 
-  const left = Math.min(Math.max(rect.left, GAP), viewportWidth - CARD_WIDTH - GAP);
+  const left = Math.min(Math.max(rect.left, GAP), viewportWidth - cardWidth.value - GAP);
   let top = rect.top + rect.height + GAP;
   if (top + cardHeight.value > viewportHeight - GAP) {
     top = rect.top - cardHeight.value - GAP;
@@ -59,17 +63,114 @@ const cardStyle = computed<Record<string, string>>(() => {
   return { top: `${Math.round(top)}px`, left: `${Math.round(left)}px` };
 });
 
-// Read the card's real height (content-driven) and move keyboard focus into
+// Read the card's real size (content/CSS-driven) and move keyboard focus into
 // the dialog so tabbing doesn't land in the obscured page behind it.
 async function syncCard(): Promise<void> {
   await nextTick();
   const card = cardRef.value;
   if (!card) return;
-  const measured = card.getBoundingClientRect().height;
-  if (measured > 0) {
-    cardHeight.value = measured;
-  }
+  const box = card.getBoundingClientRect();
+  if (box.height > 0) cardHeight.value = box.height;
+  if (box.width > 0) cardWidth.value = box.width;
   card.focus();
+}
+
+// ── Focus management ──────────────────────────────────────────────────────
+// Element that had focus before the tour opened; focus is restored to it on close.
+let previouslyFocused: HTMLElement | null = null;
+// Elements outside the card we made inert while the tour is open (so we can undo it).
+let inertElements: HTMLElement[] = [];
+
+function focusableControls(): HTMLElement[] {
+  const card = cardRef.value;
+  if (!card) return [];
+  return Array.from(
+    card.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )
+  ).filter((el) => el.offsetParent !== null || el === document.activeElement);
+}
+
+// Make everything in the document inert except the tour card, so assistive tech
+// and Tab can't reach the obscured page behind the spotlight. The card is
+// mounted deep inside the app tree, so we walk from the card up to <body> and,
+// at each level, inert every sibling that isn't on the path to the card.
+function applyInert(): void {
+  const card = cardRef.value;
+  if (!card) return;
+  inertElements = [];
+  let node: HTMLElement | null = card;
+  while (node && node !== document.body) {
+    const parent = node.parentElement;
+    if (!parent) break;
+    for (const sibling of Array.from(parent.children)) {
+      if (sibling === node) continue;
+      if (!(sibling instanceof HTMLElement)) continue;
+      if (sibling.hasAttribute("inert")) continue;
+      sibling.setAttribute("inert", "");
+      sibling.setAttribute("aria-hidden", "true");
+      inertElements.push(sibling);
+    }
+    node = parent;
+  }
+}
+
+function releaseInert(): void {
+  for (const node of inertElements) {
+    node.removeAttribute("inert");
+    node.removeAttribute("aria-hidden");
+  }
+  inertElements = [];
+}
+
+function trapTab(event: KeyboardEvent): void {
+  const items = focusableControls();
+  if (items.length === 0) {
+    event.preventDefault();
+    cardRef.value?.focus();
+    return;
+  }
+  const first = items[0];
+  const last = items[items.length - 1];
+  const active = document.activeElement as HTMLElement | null;
+  if (event.shiftKey) {
+    if (active === first || active === cardRef.value || !items.includes(active as HTMLElement)) {
+      event.preventDefault();
+      last.focus();
+    }
+  } else if (active === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+function onKeydown(event: KeyboardEvent): void {
+  switch (event.key) {
+    case "Tab":
+      trapTab(event);
+      break;
+    case "Enter":
+      // Let native button activation handle Enter when a control is focused,
+      // so we don't double-fire (e.g. Enter on "Skip" closing AND advancing).
+      if (document.activeElement instanceof HTMLButtonElement) return;
+      event.preventDefault();
+      next();
+      break;
+    case "ArrowRight":
+      event.preventDefault();
+      next();
+      break;
+    case "ArrowLeft":
+      event.preventDefault();
+      back();
+      break;
+    case "Escape":
+      event.preventDefault();
+      emit("close");
+      break;
+    default:
+      break;
+  }
 }
 
 function measure(): void {
@@ -89,20 +190,76 @@ function measure(): void {
   };
 }
 
-let measureTimer: ReturnType<typeof setTimeout> | undefined;
+let rafId: number | undefined;
 
-// The sidebar slides in on small screens, so measure once immediately and
-// again after its transition has finished.
+function cancelScheduledMeasure(): void {
+  if (rafId !== undefined) {
+    cancelAnimationFrame(rafId);
+    rafId = undefined;
+  }
+}
+
+// The sidebar slides in/out on small screens (and other layout settles), which
+// moves the targets. Rather than guessing a fixed delay tied to the CSS
+// transition duration, re-measure on every animation frame until the target
+// rect stops changing, then stop. This adapts automatically to whatever the
+// real transition length is, with a safety cap so we never loop forever.
 function scheduleMeasure(): void {
-  measure();
-  window.clearTimeout(measureTimer);
-  measureTimer = window.setTimeout(measure, 320);
+  cancelScheduledMeasure();
+
+  let lastKey = "";
+  let stableFrames = 0;
+  const STABLE_FRAMES_REQUIRED = 3;
+  const MAX_FRAMES = 60; // ~1s safety cap
+
+  let frames = 0;
+  const step = (): void => {
+    rafId = undefined;
+    measure();
+    const rect = spotlight.value;
+    const key = rect ? `${rect.top}|${rect.left}|${rect.width}|${rect.height}` : "none";
+    stableFrames = key === lastKey ? stableFrames + 1 : 0;
+    lastKey = key;
+    frames += 1;
+    if (stableFrames >= STABLE_FRAMES_REQUIRED || frames >= MAX_FRAMES) {
+      cancelScheduledMeasure();
+      return;
+    }
+    rafId = requestAnimationFrame(step);
+  };
+  rafId = requestAnimationFrame(step);
+}
+
+// Set up / tear down the document-level state that should exist only while the
+// tour is on screen: captured focus, inert background, and keyboard handling.
+function activateTour(): void {
+  previouslyFocused =
+    document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  void nextTick(() => {
+    applyInert();
+  });
+  window.addEventListener("keydown", onKeydown);
+}
+
+function deactivateTour(): void {
+  window.removeEventListener("keydown", onKeydown);
+  cancelScheduledMeasure();
+  releaseInert();
+  const target = previouslyFocused;
+  previouslyFocused = null;
+  if (target && document.contains(target)) {
+    target.focus();
+  }
 }
 
 watch(
   () => props.open,
-  (open) => {
-    if (!open) return;
+  (open, wasOpen) => {
+    if (!open) {
+      if (wasOpen) deactivateTour();
+      return;
+    }
+    activateTour();
     if (index.value !== 0) {
       // The index watcher emits and measures; doing it here too would double-fire.
       index.value = 0;
@@ -142,7 +299,8 @@ function onResize(): void {
 window.addEventListener("resize", onResize);
 onBeforeUnmount(() => {
   window.removeEventListener("resize", onResize);
-  window.clearTimeout(measureTimer);
+  if (props.open) deactivateTour();
+  else cancelScheduledMeasure();
 });
 </script>
 

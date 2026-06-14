@@ -1,0 +1,58 @@
+/* Shared design tokens — single source of truth for webapp + adminapp.
+   Imported by both main.ts entrypoints before their app stylesheet. */
+
+:root {
+  --bg: #0e1117;
+  --surface: #161b22;
+  --surface-raised: #1c2129;
+  --surface-overlay: #21262d;
+  --line: #30363d;
+  --line-subtle: #21262d;
+  --input-border: #6e7681;
+  --text: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-tertiary: #8b949e;
+  --primary: #3fb950;
+  --primary-hover: #2ea043;
+  --primary-muted: rgba(63, 185, 80, 0.15);
+  --accent: #58a6ff;
+  --accent-muted: rgba(88, 166, 255, 0.15);
+  --danger: #f85149;
+  --danger-muted: rgba(248, 81, 73, 0.15);
+  --warning: #d29922;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.5);
+  --transition-fast: 150ms ease;
+  --transition-base: 200ms ease;
+  --sidebar-width: 320px;
+  --header-height: 56px;
+}
+
+[data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #f6f8fa;
+  --surface-raised: #ffffff;
+  --surface-overlay: #f0f2f5;
+  --line: #d0d7de;
+  --line-subtle: #e8ecf0;
+  --input-border: #8c959f;
+  --text: #1f2328;
+  --text-secondary: #656d76;
+  --text-tertiary: #8c959f;
+  --primary: #1a7f37;
+  --primary-hover: #116329;
+  --primary-muted: rgba(26, 127, 55, 0.12);
+  --accent: #0969da;
+  --accent-muted: rgba(9, 105, 218, 0.12);
+  --danger: #cf222e;
+  --danger-muted: rgba(207, 34, 46, 0.12);
+  --warning: #9a6700;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
