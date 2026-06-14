@@ -101,7 +101,7 @@ function applyInert(): void {
   inertElements = [];
   let node: HTMLElement | null = card;
   while (node && node !== document.body) {
-    const parent = node.parentElement;
+    const parent: HTMLElement | null = node.parentElement;
     if (!parent) break;
     for (const sibling of Array.from(parent.children)) {
       if (sibling === node) continue;
@@ -132,6 +132,7 @@ function trapTab(event: KeyboardEvent): void {
   }
   const first = items[0];
   const last = items[items.length - 1];
+  if (!first || !last) return;
   const active = document.activeElement as HTMLElement | null;
   if (event.shiftKey) {
     if (active === first || active === cardRef.value || !items.includes(active as HTMLElement)) {

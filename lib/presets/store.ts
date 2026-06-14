@@ -13,9 +13,47 @@ interface RoutesConfigFile {
   routes: RouteConfig[];
 }
 
+// Allowed characters for a preset id used as a filename. This is a no-op for
+// normal slugs (from slugify) and uuids, but rejects anything that could
+// escape the presets directory.
+const SAFE_PRESET_ID = /^[a-z0-9][a-z0-9-_]*$/i;
+
+// Reject ids that contain path separators or traversal sequences, then enforce
+// the safe charset. Returns the id unchanged for legitimate ids so existing
+// presets continue to load.
+function sanitizePresetId(rawId: string): string {
+  const id = String(rawId);
+  if (
+    id.length === 0 ||
+    id.includes("/") ||
+    id.includes("\\") ||
+    id.includes("\0") ||
+    id === "." ||
+    id === ".." ||
+    id.includes("..") ||
+    !SAFE_PRESET_ID.test(id)
+  ) {
+    throw new Error(`Invalid preset id "${rawId}"`);
+  }
+  return id;
+}
+
 export function createPresetStore({ rootDir }: { rootDir: string }) {
   const presetsDir = path.join(rootDir, "presets");
+  const resolvedPresetsDir = path.resolve(presetsDir);
   const routesConfigPath = path.join(rootDir, "routes.json");
+
+  // Defense-in-depth: build the preset file path from a sanitized id and verify
+  // the resolved path stays inside the presets directory.
+  function presetFilePath(rawId: string): string {
+    const safeId = sanitizePresetId(rawId);
+    const filePath = path.join(presetsDir, `${safeId}.json`);
+    const resolved = path.resolve(filePath);
+    if (resolved !== resolvedPresetsDir && !resolved.startsWith(resolvedPresetsDir + path.sep)) {
+      throw new Error(`Invalid preset id "${rawId}"`);
+    }
+    return filePath;
+  }
 
   async function listFilePresets(): Promise<FilePresetItem[]> {
     await fs.mkdir(presetsDir, { recursive: true });
@@ -89,7 +127,7 @@ export function createPresetStore({ rootDir }: { rootDir: string }) {
         throw new Error(`Unknown preset source "${source}"`);
       }
 
-      const filePath = path.join(presetsDir, `${rawId}.json`);
+      const filePath = presetFilePath(rawId);
       const route = await readJson<RouteConfig>(filePath);
       return {
         id,
@@ -100,8 +138,8 @@ export function createPresetStore({ rootDir }: { rootDir: string }) {
     },
 
     async save({ name, route }: PresetSaveRequest): Promise<PresetDetail> {
-      const id = route.id ?? slugify(name || `${route.start?.label ?? "route"}-preset`);
-      const filePath = path.join(presetsDir, `${id}.json`);
+      const id = sanitizePresetId(route.id ?? slugify(name || `${route.start?.label ?? "route"}-preset`));
+      const filePath = presetFilePath(id);
       const payload: RouteConfig & { id: string; name: string } = {
         ...route,
         id,

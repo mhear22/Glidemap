@@ -104,7 +104,17 @@ export async function renderRouteToVideo(
     const ffmpegStdin = activeFfmpegProcess.stdin!;
     ffmpegStdin.on("error", () => {});
     activeFfmpegProcess.stdout!.on("data", () => {});
-    activeFfmpegProcess.stderr!.on("data", () => {});
+    // Capture the tail of ffmpeg stderr so a failure surfaces a real reason
+    // (codec/arg/pipe error) instead of just a bare exit code.
+    const ffmpegErrChunks: string[] = [];
+    activeFfmpegProcess.stderr!.on("data", (chunk: Buffer) => {
+      ffmpegErrChunks.push(chunk.toString());
+      if (ffmpegErrChunks.length > 60) ffmpegErrChunks.splice(0, ffmpegErrChunks.length - 60);
+    });
+    const ffmpegErrorDetail = (): string => {
+      const tail = ffmpegErrChunks.join("").trim().split("\n").slice(-8).join("\n");
+      return tail ? `:\n${tail}` : "";
+    };
 
     let ffmpegExitCode: number | null = null;
 
@@ -131,7 +141,7 @@ export async function renderRouteToVideo(
       const buffer = await page.screenshot({ type: "jpeg", quality: 92 });
 
       if (ffmpegExited) {
-        throw new Error(`ffmpeg exited prematurely with code ${ffmpegExitCode}`);
+        throw new Error(`ffmpeg exited prematurely with code ${ffmpegExitCode}${ffmpegErrorDetail()}`);
       }
 
       const drained = ffmpegStdin.write(buffer);
@@ -165,7 +175,7 @@ export async function renderRouteToVideo(
         if (ffmpegExitCode === 0) {
           resolve();
         } else {
-          reject(new Error(`ffmpeg exited with code ${ffmpegExitCode}`));
+          reject(new Error(`ffmpeg exited with code ${ffmpegExitCode}${ffmpegErrorDetail()}`));
         }
         return;
       }
@@ -174,7 +184,7 @@ export async function renderRouteToVideo(
         if (code === 0) {
           resolve();
         } else {
-          reject(new Error(`ffmpeg exited with code ${code}`));
+          reject(new Error(`ffmpeg exited with code ${code}${ffmpegErrorDetail()}`));
         }
       });
 

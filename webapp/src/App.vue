@@ -209,7 +209,9 @@ let toastId = 0;
 
 function notify(message: string, type: Toast["type"] = "info", action?: ToastAction): void {
   const id = ++toastId;
-  toasts.value.push({ id, message, type, action });
+  const toast: Toast = { id, message, type };
+  if (action) toast.action = action;
+  toasts.value.push(toast);
   window.setTimeout(() => {
     toasts.value = toasts.value.filter((toast) => toast.id !== id);
   }, type === "error" || action ? 6000 : 3500);
@@ -250,6 +252,43 @@ function handleAvatarUpload(event: Event): void {
 
 function clearAvatar(): void {
   delete route.avatarUrl;
+}
+
+async function handleTrackUpload(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const payload = await requestJson<{ path: { coordinates: [number, number][] } }>("/api/import-track", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text })
+    });
+    const coords = payload.path?.coordinates ?? [];
+    if (coords.length < 2) {
+      notify("No usable track points found in that file.", "error");
+      return;
+    }
+    const startCoord = coords[0];
+    const endCoord = coords[coords.length - 1];
+    if (!startCoord || !endCoord) {
+      notify("No usable track points found in that file.", "error");
+      return;
+    }
+    const base = file.name.replace(/\.[^.]+$/, "");
+    route.path = payload.path as RouteFormData["path"];
+    route.start = { label: `${base} (start)`, query: "", coords: startCoord };
+    route.end = { label: `${base} (end)`, query: "", coords: endCoord };
+    presetName.value = "";
+    previewProgress.value = 0;
+    schedulePreview(0);
+    notify(`Imported ${coords.length} track points from ${file.name}.`, "success");
+  } catch (error) {
+    notify(`Could not import track: ${errorMessage(error)}`, "error");
+  } finally {
+    input.value = "";
+  }
 }
 
 function avatarPreviewRadius(shape?: string): string {
@@ -791,6 +830,7 @@ onMounted(async () => {
     if (!focusable.length) return;
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
+    if (!first || !last) return;
     const active = document.activeElement as HTMLElement | null;
     if (e.shiftKey && (active === first || !modal.contains(active))) {
       e.preventDefault();
@@ -924,6 +964,14 @@ onBeforeUnmount(() => {
                 </label>
               </div>
               <span class="field-hint">PNG/JPG, travels along the route &mdash; click it to adjust shape and border</span>
+            </label>
+            <label class="field">
+              <span class="field-label">Import track (GPX / KML)</span>
+              <label class="avatar-upload-btn">
+                <span>Choose file</span>
+                <input type="file" accept=".gpx,.kml,application/gpx+xml,application/vnd.google-earth.kml+xml" class="avatar-file-input" @change="handleTrackUpload" />
+              </label>
+              <span class="field-hint">Render a recorded GPX/KML track instead of routing between two places</span>
             </label>
           </div>
         </div>
