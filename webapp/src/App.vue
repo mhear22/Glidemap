@@ -330,6 +330,9 @@ const queueOpen = ref(false);
 const infoOpen = ref(false);
 const helpOpen = ref(false);
 const tourOpen = ref(false);
+// The common controls (origin, destination, map style, resolution) are always
+// visible; everything else lives behind this fold-away.
+const advancedOpen = ref(false);
 // "/" is the about page, "/studio" is the editor.
 const showLanding = ref(window.location.pathname !== "/studio");
 
@@ -419,6 +422,10 @@ function onTourChange(stepIndex: number): void {
   const step = tourSteps[stepIndex];
   if (step) {
     sidebarOpen.value = Boolean(step.sidebar);
+    // Reveal the advanced fold-away when a step highlights something inside it.
+    if (step.target.includes("mode") || step.target.includes("camera")) {
+      advancedOpen.value = true;
+    }
   }
 }
 
@@ -463,7 +470,6 @@ const baseTitle = document.title;
 const previewReady = computed<boolean>(() => Boolean(route.start.coords && route.end.coords));
 const canQueueRender = computed<boolean>(() => previewReady.value);
 const hasLocationText = computed<boolean>(() => Boolean(route.start.query.trim() || route.end.query.trim()));
-const routeSummaryLabel = computed<string>(() => route.name || route.id || "Untitled route");
 const previewLocationLabel = computed<string>(() => {
   if (!previewRoute.value) return "";
   const startLabel =
@@ -968,46 +974,7 @@ onBeforeUnmount(() => {
     <!-- Sidebar -->
     <aside class="sidebar" :class="{ open: sidebarOpen }">
       <div class="sidebar-scroll">
-        <!-- Route Setup -->
-        <div class="section">
-          <div class="section-header">
-            <h2>Route Setup</h2>
-            <span class="meta">
-              <span>{{ routeSummaryLabel }}</span>
-            </span>
-          </div>
-          <div style="display:flex;flex-direction:column;gap:8px;">
-            <label class="field">
-              <span class="field-label">Route name</span>
-              <input v-model="route.name" class="text-input" placeholder="e.g. Airport hop" />
-            </label>
-            <label class="field">
-              <span class="field-label">Avatar marker</span>
-              <div class="avatar-upload-row">
-                <button v-if="avatarPreviewUrl" type="button" class="avatar-preview-wrap" @click="avatarModalOpen = true" title="Edit avatar" aria-label="Edit avatar">
-                  <img :src="avatarPreviewUrl" class="avatar-preview-thumb" alt="Avatar" />
-                </button>
-                <label v-else class="avatar-upload-btn">
-                  <span>Choose image</span>
-                  <input type="file" accept="image/png,image/jpeg,image/webp" class="avatar-file-input" @change="handleAvatarUpload" />
-                </label>
-              </div>
-              <span class="field-hint">PNG/JPG, travels along the route &mdash; click it to adjust shape and border</span>
-            </label>
-            <label class="field">
-              <span class="field-label">Import track (GPX / KML)</span>
-              <label class="avatar-upload-btn">
-                <span>Choose file</span>
-                <input type="file" accept=".gpx,.kml,application/gpx+xml,application/vnd.google-earth.kml+xml" class="avatar-file-input" @change="handleTrackUpload" />
-              </label>
-              <span class="field-hint">Render a recorded GPX/KML track instead of routing between two places</span>
-            </label>
-          </div>
-        </div>
-
-        <div class="section-divider" />
-
-        <!-- Locations -->
+        <!-- Locations (the common, first-and-foremost controls) -->
         <div class="section">
           <div class="section-header"><h2>Locations</h2></div>
           <div style="display:flex;flex-direction:column;gap:10px;">
@@ -1035,15 +1002,7 @@ onBeforeUnmount(() => {
               @select="applySearchResult('end', $event)"
               @open-modal="openSearchModal('end')"
             />
-            <div class="field-row" data-tour="mode">
-              <label class="field">
-                <span class="field-label">Travel mode</span>
-                <select v-model="route.mode" class="select-input">
-                  <option value="walking">Walking</option>
-                  <option value="driving">Driving</option>
-                  <option value="flying">Flying</option>
-                </select>
-              </label>
+            <div class="field-row">
               <label class="field">
                 <span class="field-label">Map style</span>
                 <select v-model="route.mapType" class="select-input">
@@ -1051,47 +1010,6 @@ onBeforeUnmount(() => {
                   <option value="standard">Standard</option>
                 </select>
               </label>
-            </div>
-          </div>
-        </div>
-
-        <div class="section-divider" />
-
-        <!-- Camera & Motion -->
-        <div class="section" data-tour="camera">
-          <div class="section-header"><h2>Camera &amp; Motion</h2></div>
-          <CurveEditor
-            :camera="route.camera"
-            :progress="previewProgress"
-            :route="previewRoute"
-            @update-camera="route.camera = $event"
-          />
-          <TimingCurveEditor
-            :camera="route.camera"
-            :progress="previewProgress"
-            @update-camera="route.camera = $event"
-          />
-          <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">
-            <label class="field">
-              <span class="field-label">Duration (s)</span>
-              <input v-model.number="route.durationSeconds" class="text-input" type="number" inputmode="decimal" min="4" max="20" step="0.5" />
-            </label>
-            <label class="field">
-              <span class="field-label">Smoothing</span>
-              <input v-model.number="route.camera.smoothing" class="text-input" type="number" inputmode="decimal" min="0" max="1" step="0.01" />
-            </label>
-            <label class="field">
-              <span class="field-label">Lerp aggressiveness</span>
-              <input v-model.number="route.camera.aggressiveness" class="text-input" type="number" inputmode="numeric" min="0" max="100" step="1" />
-            </label>
-            <label class="field">
-              <span class="field-label">Clip path to camera</span>
-              <select v-model="route.camera.clipPath" class="select-input">
-                <option :value="false">Off</option>
-                <option :value="true">On</option>
-              </select>
-            </label>
-            <div class="field-row">
               <label class="field">
                 <span class="field-label">Resolution</span>
                 <select :value="resolutionPreset" class="select-input" @change="applyResolution(($event.target as HTMLSelectElement).value)">
@@ -1102,13 +1020,109 @@ onBeforeUnmount(() => {
                   <option value="custom" disabled>Custom ({{ route.width }}&times;{{ route.height }})</option>
                 </select>
               </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="section-divider" />
+
+        <!-- Advanced options (collapsed by default) -->
+        <div class="section">
+          <button
+            type="button"
+            class="advanced-toggle"
+            :aria-expanded="advancedOpen"
+            @click="advancedOpen = !advancedOpen"
+          >
+            <h2>Advanced options</h2>
+            <svg class="advanced-chevron" :class="{ open: advancedOpen }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+
+          <div v-show="advancedOpen" class="advanced-body">
+            <div style="display:flex;flex-direction:column;gap:8px;">
               <label class="field">
-                <span class="field-label">Format</span>
-                <select v-model="route.format" class="select-input">
-                  <option value="mp4">MP4 (H.264)</option>
-                  <option value="webm">WebM (VP9)</option>
-                </select>
+                <span class="field-label">Route name</span>
+                <input v-model="route.name" class="text-input" placeholder="e.g. Airport hop" />
               </label>
+              <div class="field-row" data-tour="mode">
+                <label class="field">
+                  <span class="field-label">Travel mode</span>
+                  <select v-model="route.mode" class="select-input">
+                    <option value="walking">Walking</option>
+                    <option value="driving">Driving</option>
+                    <option value="flying">Flying</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span class="field-label">Format</span>
+                  <select v-model="route.format" class="select-input">
+                    <option value="mp4">MP4 (H.264)</option>
+                    <option value="webm">WebM (VP9)</option>
+                  </select>
+                </label>
+              </div>
+              <label class="field">
+                <span class="field-label">Avatar marker</span>
+                <div class="avatar-upload-row">
+                  <button v-if="avatarPreviewUrl" type="button" class="avatar-preview-wrap" @click="avatarModalOpen = true" title="Edit avatar" aria-label="Edit avatar">
+                    <img :src="avatarPreviewUrl" class="avatar-preview-thumb" alt="Avatar" />
+                  </button>
+                  <label v-else class="avatar-upload-btn">
+                    <span>Choose image</span>
+                    <input type="file" accept="image/png,image/jpeg,image/webp" class="avatar-file-input" @change="handleAvatarUpload" />
+                  </label>
+                </div>
+                <span class="field-hint">PNG/JPG, travels along the route &mdash; click it to adjust shape and border</span>
+              </label>
+              <label class="field">
+                <span class="field-label">Import track (GPX / KML)</span>
+                <label class="avatar-upload-btn">
+                  <span>Choose file</span>
+                  <input type="file" accept=".gpx,.kml,application/gpx+xml,application/vnd.google-earth.kml+xml" class="avatar-file-input" @change="handleTrackUpload" />
+                </label>
+                <span class="field-hint">Render a recorded GPX/KML track instead of routing between two places</span>
+              </label>
+            </div>
+
+            <div class="section-divider" />
+
+            <!-- Camera & Motion -->
+            <div data-tour="camera">
+              <div class="section-header"><h2>Camera &amp; Motion</h2></div>
+              <CurveEditor
+                :camera="route.camera"
+                :progress="previewProgress"
+                :route="previewRoute"
+                @update-camera="route.camera = $event"
+              />
+              <TimingCurveEditor
+                :camera="route.camera"
+                :progress="previewProgress"
+                @update-camera="route.camera = $event"
+              />
+              <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">
+                <label class="field">
+                  <span class="field-label">Duration (s)</span>
+                  <input v-model.number="route.durationSeconds" class="text-input" type="number" inputmode="decimal" min="4" max="20" step="0.5" />
+                </label>
+                <label class="field">
+                  <span class="field-label">Smoothing</span>
+                  <input v-model.number="route.camera.smoothing" class="text-input" type="number" inputmode="decimal" min="0" max="1" step="0.01" />
+                </label>
+                <label class="field">
+                  <span class="field-label">Lerp aggressiveness</span>
+                  <input v-model.number="route.camera.aggressiveness" class="text-input" type="number" inputmode="numeric" min="0" max="100" step="1" />
+                </label>
+                <label class="field">
+                  <span class="field-label">Clip path to camera</span>
+                  <select v-model="route.camera.clipPath" class="select-input">
+                    <option :value="false">Off</option>
+                    <option :value="true">On</option>
+                  </select>
+                </label>
+              </div>
             </div>
           </div>
         </div>

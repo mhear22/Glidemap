@@ -161,6 +161,48 @@ a:hover {
   margin: 8px 0;
 }
 
+/* ─── Advanced options fold-away ───────────────────────── */
+
+.advanced-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 0 6px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.advanced-toggle h2 {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+}
+
+.advanced-toggle:hover h2 {
+  color: var(--text-primary);
+}
+
+.advanced-chevron {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  transition: transform 0.18s ease;
+}
+
+.advanced-chevron.open {
+  transform: rotate(180deg);
+}
+
+.advanced-body {
+  display: flex;
+  flex-direction: column;
+}
+
 /* ─── Form Fields ──────────────────────────────────────── */
 
 .field {
