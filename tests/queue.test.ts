@@ -32,3 +32,35 @@ test("render queue processes jobs sequentially", async () => {
   assert.equal(firstJob.status, "completed");
   assert.equal(secondJob.status, "completed");
 });
+
+test("drain cancels queued jobs and aborts the running job", async () => {
+  let abortObserved = false;
+  const queue = createRenderQueue({
+    worker: (payload, _emit, signal) =>
+      new Promise<RenderResult>((resolve, reject) => {
+        signal.addEventListener("abort", () => {
+          abortObserved = true;
+          reject(new DOMException("Render cancelled", "AbortError"));
+        });
+        // Never resolves on its own; only abort ends it.
+        void payload;
+      })
+  });
+
+  queue.enqueue({ route: { id: "running" } });
+  queue.enqueue({ route: { id: "waiting" } });
+
+  // Let the first job start.
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  const result = queue.drain();
+  assert.equal(result.running.length, 1);
+  assert.equal(result.queued.length, 1);
+
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(abortObserved, true);
+
+  const statuses = queue.list().map((job) => job.status);
+  // The queued job is cancelled; the running job ends cancelled via abort.
+  assert.ok(statuses.every((status) => status === "cancelled"));
+});

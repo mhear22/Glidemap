@@ -75,7 +75,10 @@ async function requestJson<T = unknown>(url: URL, { retries = 3 }: { retries?: n
   throw lastError;
 }
 
-export function createOsmProvider(baseUrl: string = "https://nominatim.openstreetmap.org"): Provider {
+export function createOsmProvider(
+  baseUrl: string = "https://nominatim.openstreetmap.org",
+  osrmBaseUrl: string = "https://router.project-osrm.org"
+): Provider {
   return {
     id: "osm",
 
@@ -112,7 +115,8 @@ export function createOsmProvider(baseUrl: string = "https://nominatim.openstree
     async route({ fromCoords, toCoords, mode }: { fromCoords: [number, number]; toCoords: [number, number]; mode: string }): Promise<RoutedPath> {
       const profile = mapTravelModeToProfile(mode);
       const url = new URL(
-        `https://router.project-osrm.org/route/v1/${profile}/${fromCoords[0]},${fromCoords[1]};${toCoords[0]},${toCoords[1]}`
+        `/route/v1/${profile}/${fromCoords[0]},${fromCoords[1]};${toCoords[0]},${toCoords[1]}`,
+        osrmBaseUrl
       );
       url.searchParams.set("overview", "full");
       url.searchParams.set("geometries", "geojson");

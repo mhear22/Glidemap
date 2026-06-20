@@ -16,8 +16,17 @@ export interface Provider {
   route(params: { fromCoords: [number, number]; toCoords: [number, number]; mode: string }): Promise<RoutedPath>;
 }
 
+export interface SearchCacheStats {
+  size: number;
+  maxEntries: number;
+  hits: number;
+  misses: number;
+}
+
 export interface ProviderRegistry {
   defaultProvider: string;
   getProvider(name?: string): Provider;
   listProviders(): string[];
+  /** Search-result cache statistics, or null when caching is disabled. */
+  searchCacheStats?(): SearchCacheStats | null;
 }

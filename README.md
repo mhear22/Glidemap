@@ -35,6 +35,63 @@ npm run serve
 
 That serves the built main app on [http://127.0.0.1:5173](http://127.0.0.1:5173) and the built admin app on [http://127.0.0.1:5174](http://127.0.0.1:5174).
 
+## Configuration
+
+All runtime configuration is read from the environment once at startup and validated (the
+process exits with a clear message on bad input). See [lib/config.ts](./lib/config.ts).
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `HOST` | `127.0.0.1` | Bind address. Use `0.0.0.0` in containers. |
+| `PORT` | `5173` (UI) / `4822` (API) | Main frontend port, or API port when UI hosting is off. |
+| `MAPANIM_MAIN_PORT` | `5173` | Main frontend port (when `PORT` is unset). |
+| `MAPANIM_ADMIN_PORT` | `5174` | Admin frontend port. Must differ from the main port. |
+| `MAPANIM_API_PORT` | `4822` | Backend-only API port (when `PORT` is unset). |
+| `MAPANIM_SERVE_UI` | `1` | Set `0` to run the backend API/render process only. |
+| `LOG_LEVEL` | `debug` (dev) / `info` (prod) | `debug`, `info`, `warn`, `error`, or `silent`. |
+| `MAPANIM_MAX_BODY_BYTES` | `1048576` | Hard cap on request body size (DoS protection). |
+| `MAPANIM_REQUEST_TIMEOUT_MS` | `30000` | Per-request receive timeout (`0` disables). |
+| `MAPANIM_RATE_MAX` / `MAPANIM_RATE_WINDOW_MS` | `240` / `60000` | Default per-IP rate limit for `/api/*`. |
+| `MAPANIM_SEARCH_RATE_MAX` / `MAPANIM_SEARCH_RATE_WINDOW_MS` | `30` / `60000` | Tighter limit for the upstream-hitting `/api/search`. |
+| `MAPANIM_SHUTDOWN_TIMEOUT_MS` | `10000` | Grace period for in-flight requests to drain on `SIGTERM`/`SIGINT`. |
+| `MAPANIM_API_SECRET` | _(unset)_ | When set (min 16 chars), `/api/*` requires `Authorization: Bearer <secret>`. Health/readiness/metrics stay open. |
+| `MAPANIM_TRUST_PROXY` | `0` | Trust `X-Forwarded-For` for client identity (rate limiting, metrics). Enable only behind a known proxy. |
+| `MAPANIM_CORS_ORIGINS` | _(empty)_ | Comma-separated allowed origins, or `*`. Empty disables CORS (same-origin only). |
+| `MAPANIM_CSP` | `1` | Emit the Content-Security-Policy header. Disable if a fronting proxy sets its own. |
+| `NOMINATIM_URL` | OSM public server | Geocoding (search) provider base URL. |
+| `OSRM_URL` | OSRM demo server | Routing provider base URL. |
+| `MAPANIM_SEARCH_CACHE_MAX` | `500` | Max distinct geocoding queries cached in memory (`0` disables the cache). |
+| `MAPANIM_SEARCH_CACHE_TTL_MS` | `3600000` | How long a cached search result stays fresh (`0` disables the cache). |
+
+Logs are emitted as structured JSON lines (one object per line) with a per-request `requestId`,
+so they drop straight into a log aggregator. The server honours an inbound `X-Request-Id`
+header (sanitised and length-capped) for cross-service tracing and echoes the id back on the
+response, minting a fresh one when the caller doesn't supply a valid one.
+
+## Operational endpoints
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/health` (alias `/healthz`) | Liveness — always `200` while the process is up. Returns name, version, uptime. |
+| `GET /api/ready` (alias `/readyz`) | Readiness — `200` once the render origin is wired up, `503` while starting or shutting down. |
+| `GET /metrics` | Prometheus exposition (request rate/latency/errors, render queue depth, search-cache hits/misses/size). |
+| `GET /api/metrics` | Visitor/search/cache counters for the last 24h (JSON, for the admin UI). |
+
+Operational endpoints bypass rate limiting and auth so orchestrators and Prometheus scrapers
+are never throttled or blocked; protect `/metrics` at the network layer if it must stay private.
+Request validation rejects out-of-range render parameters (dimensions, fps, duration, zoom,
+coordinates) with `400` before a job is queued.
+
+Responses carry a baseline set of security headers (CSP tuned for MapLibre, `X-Content-Type-Options`,
+`X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`) and rate-limit headers
+(`X-RateLimit-Limit`/`-Remaining`/`-Reset`). On `SIGTERM`/`SIGINT` the server stops accepting new
+connections, drains in-flight requests, releases SSE streams, and exits within the shutdown timeout.
+
+Geocoding searches are cached in a bounded, in-memory TTL cache (single-flight, so a
+burst of identical queries makes one upstream call). This shields the upstream provider
+— the public OSM Nominatim server requires callers to cache results — and cuts tail
+latency. Tune or disable it with `MAPANIM_SEARCH_CACHE_MAX` / `MAPANIM_SEARCH_CACHE_TTL_MS`.
+
 The app includes:
 
 - place search backed by the default OSM provider

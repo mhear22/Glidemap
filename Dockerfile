@@ -45,7 +45,19 @@ RUN npm test \
 
 ENV NODE_ENV=production
 
+# Create writable runtime directories and drop to the unprivileged `node` user
+# (uid 1000, provided by the base image) so the container never runs as root.
+RUN mkdir -p /app/output /app/presets /app/.tile-cache /app/.metrics \
+    && chown -R node:node /app
+
+USER node
+
 EXPOSE 5173
 EXPOSE 5174
+
+# Liveness probe via the built-in health endpoint. Uses Node's global fetch so no
+# extra package (curl/wget) is needed in the image.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+    CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.PORT||5173)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
 
 CMD ["node", "--import", "tsx", "server/index.ts"]

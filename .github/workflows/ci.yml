@@ -1,0 +1,42 @@
+name: CI
+
+# Fast feedback gate on every PR and push to main: typecheck, unit/integration
+# tests, and a dependency vulnerability audit. The release workflow's Docker
+# build is the heavyweight gate; this is the quick one that catches most issues
+# without downloading the Chromium build.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # --ignore-scripts skips Playwright's ~170MB Chromium download; the tests
+      # in this gate don't render, so the browser isn't needed here.
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high

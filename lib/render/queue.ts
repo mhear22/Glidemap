@@ -10,11 +10,20 @@ type WorkerCallback = (
 
 type JobsListener = (jobs: RenderJob[]) => void;
 
+interface DrainResult {
+  /** Ids of jobs that were running and have been signalled to abort. */
+  running: string[];
+  /** Ids of queued jobs that were cancelled before they could start. */
+  queued: string[];
+}
+
 interface RenderQueue {
   list(): RenderJob[];
   enqueue(payload: { route: RouteConfig }): RenderJob;
   cancel(jobId: string): boolean;
   subscribe(listener: JobsListener): () => void;
+  /** Cancel queued jobs and abort any running job. Used during shutdown. */
+  drain(): DrainResult;
 }
 
 class CancelledError extends Error {
@@ -33,13 +42,14 @@ export function createRenderQueue({ worker }: { worker: WorkerCallback }): Rende
   const jobs: RenderJob[] = [];
   const controllers = new Map<string, AbortController>();
   let running = false;
+  let draining = false;
 
   function broadcast(): void {
     emitter.emit("jobs", jobs.map((job) => ({ ...job })));
   }
 
   async function pump(): Promise<void> {
-    if (running) {
+    if (running || draining) {
       return;
     }
 
@@ -141,6 +151,29 @@ export function createRenderQueue({ worker }: { worker: WorkerCallback }): Rende
     subscribe(listener: JobsListener): () => void {
       emitter.on("jobs", listener);
       return () => emitter.off("jobs", listener);
+    },
+
+    drain(): DrainResult {
+      draining = true;
+      const result: DrainResult = { running: [], queued: [] };
+      const now = new Date().toISOString();
+
+      for (const job of jobs) {
+        if (job.status === "queued") {
+          job.status = "cancelled";
+          job.stage = "cancelled";
+          job.updatedAt = now;
+          result.queued.push(job.id);
+        } else if (job.status === "running") {
+          result.running.push(job.id);
+          controllers.get(job.id)?.abort();
+        }
+      }
+
+      if (result.queued.length > 0 || result.running.length > 0) {
+        broadcast();
+      }
+      return result;
     }
   };
 }
