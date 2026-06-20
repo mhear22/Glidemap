@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import fs from "node:fs";
 import type { RenderJob, RenderProgress, RenderResult } from "../../types/index.js";
 import type { RouteConfig } from "../../types/index.js";
 
@@ -37,15 +38,53 @@ function isCancelledError(error: unknown): boolean {
   return error instanceof CancelledError || (error instanceof DOMException && error.name === "AbortError");
 }
 
-export function createRenderQueue({ worker }: { worker: WorkerCallback }): RenderQueue {
+export function createRenderQueue(
+  { worker, persistPath }: { worker: WorkerCallback; persistPath?: string }
+): RenderQueue {
   const emitter = new EventEmitter();
   const jobs: RenderJob[] = [];
   const controllers = new Map<string, AbortController>();
   let running = false;
   let draining = false;
+  let persistTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function persist(): void {
+    if (!persistPath || persistTimer) return;
+    persistTimer = setTimeout(() => {
+      persistTimer = undefined;
+      void fs.promises.writeFile(persistPath, JSON.stringify(jobs), "utf8").catch(() => {});
+    }, 250);
+    persistTimer.unref?.();
+  }
+
+  function loadPersisted(): void {
+    if (!persistPath) return;
+    let saved: unknown;
+    try {
+      saved = JSON.parse(fs.readFileSync(persistPath, "utf8"));
+    } catch {
+      return;
+    }
+    if (!Array.isArray(saved)) return;
+    const now = new Date().toISOString();
+    for (const job of saved as RenderJob[]) {
+      // A "running" job cannot survive a restart — its worker/process is gone.
+      if (job.status === "running") {
+        job.status = "failed";
+        job.stage = "failed";
+        job.error = "Interrupted by a server restart";
+        job.updatedAt = now;
+      }
+      jobs.push(job);
+      if (job.status === "queued") {
+        controllers.set(job.id, new AbortController());
+      }
+    }
+  }
 
   function broadcast(): void {
     emitter.emit("jobs", jobs.map((job) => ({ ...job })));
+    persist();
   }
 
   async function pump(): Promise<void> {
@@ -97,6 +136,11 @@ export function createRenderQueue({ worker }: { worker: WorkerCallback }): Rende
       running = false;
       await pump();
     }
+  }
+
+  loadPersisted();
+  if (jobs.some((job) => job.status === "queued")) {
+    void pump();
   }
 
   return {

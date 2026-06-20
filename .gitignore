@@ -3,6 +3,7 @@
 
 # Build output
 /webapp/dist/
+/dist/
 /adminapp/dist/
 /web/renderer.js
 /*.tsbuildinfo
@@ -35,3 +36,6 @@ pnpm-debug.log*
 # OS/editor noise
 .DS_Store
 Thumbs.db
+
+# render queue persistence (runtime state)
+.queue-state.json

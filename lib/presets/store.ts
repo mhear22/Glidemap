@@ -14,8 +14,9 @@ interface RoutesConfigFile {
 }
 
 // Preset ids become filenames, so they must never contain path separators or
-// traversal sequences. We allow the same character set slugify() produces.
-const SAFE_PRESET_ID = /^[a-z0-9][a-z0-9-]*$/;
+// traversal sequences. The charset is a no-op for normal slugs (from slugify)
+// and uuids, but rejects anything that could escape the presets directory.
+const SAFE_PRESET_ID = /^[a-z0-9][a-z0-9-_]*$/i;
 
 export class InvalidPresetIdError extends Error {
   readonly statusCode = 400;
@@ -25,16 +26,41 @@ export class InvalidPresetIdError extends Error {
   }
 }
 
-function assertSafePresetId(id: string): string {
-  if (!SAFE_PRESET_ID.test(id)) {
-    throw new InvalidPresetIdError(id);
+// Reject ids with path separators or traversal sequences, then enforce the safe
+// charset. Returns legitimate ids unchanged so existing presets still load.
+function sanitizePresetId(rawId: string): string {
+  const id = String(rawId);
+  if (
+    id.length === 0 ||
+    id.includes("/") ||
+    id.includes("\\") ||
+    id.includes("\0") ||
+    id === "." ||
+    id === ".." ||
+    id.includes("..") ||
+    !SAFE_PRESET_ID.test(id)
+  ) {
+    throw new InvalidPresetIdError(rawId);
   }
   return id;
 }
 
 export function createPresetStore({ rootDir }: { rootDir: string }) {
   const presetsDir = path.join(rootDir, "presets");
+  const resolvedPresetsDir = path.resolve(presetsDir);
   const routesConfigPath = path.join(rootDir, "routes.json");
+
+  // Defense-in-depth: build the preset file path from a sanitized id and verify
+  // the resolved path stays inside the presets directory.
+  function presetFilePath(rawId: string): string {
+    const safeId = sanitizePresetId(rawId);
+    const filePath = path.join(presetsDir, `${safeId}.json`);
+    const resolved = path.resolve(filePath);
+    if (resolved !== resolvedPresetsDir && !resolved.startsWith(resolvedPresetsDir + path.sep)) {
+      throw new InvalidPresetIdError(rawId);
+    }
+    return filePath;
+  }
 
   async function listFilePresets(): Promise<FilePresetItem[]> {
     await fs.mkdir(presetsDir, { recursive: true });
@@ -108,7 +134,7 @@ export function createPresetStore({ rootDir }: { rootDir: string }) {
         throw new Error(`Unknown preset source "${source}"`);
       }
 
-      const filePath = path.join(presetsDir, `${assertSafePresetId(rawId)}.json`);
+      const filePath = presetFilePath(rawId);
       const route = await readJson<RouteConfig>(filePath);
       return {
         id,
@@ -119,10 +145,11 @@ export function createPresetStore({ rootDir }: { rootDir: string }) {
     },
 
     async save({ name, route }: PresetSaveRequest): Promise<PresetDetail> {
-      // Slugify whatever id source we have so the result is always a safe
-      // filename, then validate to reject anything that slugified to empty.
-      const id = assertSafePresetId(slugify(route.id || name || `${route.start?.label ?? "route"}-preset`));
-      const filePath = path.join(presetsDir, `${id}.json`);
+      // An explicit route.id is validated strictly (a bad one is rejected, not
+      // silently rewritten); a missing id is derived from the name and slugified
+      // into a safe filename. Both then pass the containment check.
+      const id = sanitizePresetId(route.id || slugify(name || `${route.start?.label ?? "route"}-preset`));
+      const filePath = presetFilePath(id);
       const payload: RouteConfig & { id: string; name: string } = {
         ...route,
         id,

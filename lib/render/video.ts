@@ -18,6 +18,31 @@ async function ensureOutputDir(rootDir: string, filePath: string): Promise<void>
   await ensureDir(path.dirname(path.resolve(rootDir, filePath)));
 }
 
+// Reuse one warm Chromium across render jobs (the queue runs them serially);
+// cold-launching the browser per job is one of the most expensive steps.
+let sharedBrowser: Browser | null = null;
+
+async function getBrowser(): Promise<Browser> {
+  if (sharedBrowser && sharedBrowser.isConnected()) {
+    return sharedBrowser;
+  }
+  sharedBrowser = await chromium.launch();
+  return sharedBrowser;
+}
+
+/** Close the warm browser (called on graceful shutdown). */
+export async function closeRenderBrowser(): Promise<void> {
+  const browser = sharedBrowser;
+  sharedBrowser = null;
+  if (browser) {
+    try {
+      await browser.close();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 export async function renderRouteToVideo(
   routeConfig: RouteConfig,
   options: RenderRouteToVideoOptions
@@ -42,13 +67,13 @@ export async function renderRouteToVideo(
     providerRegistry ? { providerRegistry } : {}
   );
 
-  let browser: Browser | undefined;
+  let page: Page | undefined;
   let ffmpegProcess: ChildProcess | undefined;
   let ffmpegExited = false;
 
   try {
-    browser = await chromium.launch();
-    const page: Page = await browser.newPage({
+    const browser = await getBrowser();
+    page = await browser.newPage({
       viewport: {
         width: Number(route.width ?? 1920),
         height: Number(route.height ?? 1080)
@@ -83,19 +108,22 @@ export async function renderRouteToVideo(
     const durationSeconds = Number(route.durationSeconds ?? 8);
     const totalFrames = Math.max(2, Math.round(fps * durationSeconds));
 
-    const output = `output/${crypto.randomUUID()}.mp4`;
+    const format = route.format === "webm" ? "webm" : "mp4";
+    const output = `output/${crypto.randomUUID()}.${format}`;
     route.output = output;
     await ensureOutputDir(rootDir, output);
     const outputPath = path.resolve(rootDir, output);
+
+    const codecArgs = format === "webm"
+      ? ["-c:v", "libvpx-vp9", "-pix_fmt", "yuv420p", "-b:v", "0", "-crf", "32", "-row-mt", "1"]
+      : ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart"];
 
     const ffmpegArgs = [
       "-y",
       "-f", "image2pipe",
       "-framerate", String(fps),
       "-i", "pipe:0",
-      "-c:v", "libx264",
-      "-pix_fmt", "yuv420p",
-      "-movflags", "+faststart",
+      ...codecArgs,
       outputPath
     ];
 
@@ -104,7 +132,17 @@ export async function renderRouteToVideo(
     const ffmpegStdin = activeFfmpegProcess.stdin!;
     ffmpegStdin.on("error", () => {});
     activeFfmpegProcess.stdout!.on("data", () => {});
-    activeFfmpegProcess.stderr!.on("data", () => {});
+    // Capture the tail of ffmpeg stderr so a failure surfaces a real reason
+    // (codec/arg/pipe error) instead of just a bare exit code.
+    const ffmpegErrChunks: string[] = [];
+    activeFfmpegProcess.stderr!.on("data", (chunk: Buffer) => {
+      ffmpegErrChunks.push(chunk.toString());
+      if (ffmpegErrChunks.length > 60) ffmpegErrChunks.splice(0, ffmpegErrChunks.length - 60);
+    });
+    const ffmpegErrorDetail = (): string => {
+      const tail = ffmpegErrChunks.join("").trim().split("\n").slice(-8).join("\n");
+      return tail ? `:\n${tail}` : "";
+    };
 
     let ffmpegExitCode: number | null = null;
 
@@ -131,7 +169,7 @@ export async function renderRouteToVideo(
       const buffer = await page.screenshot({ type: "jpeg", quality: 92 });
 
       if (ffmpegExited) {
-        throw new Error(`ffmpeg exited prematurely with code ${ffmpegExitCode}`);
+        throw new Error(`ffmpeg exited prematurely with code ${ffmpegExitCode}${ffmpegErrorDetail()}`);
       }
 
       const drained = ffmpegStdin.write(buffer);
@@ -165,7 +203,7 @@ export async function renderRouteToVideo(
         if (ffmpegExitCode === 0) {
           resolve();
         } else {
-          reject(new Error(`ffmpeg exited with code ${ffmpegExitCode}`));
+          reject(new Error(`ffmpeg exited with code ${ffmpegExitCode}${ffmpegErrorDetail()}`));
         }
         return;
       }
@@ -174,7 +212,7 @@ export async function renderRouteToVideo(
         if (code === 0) {
           resolve();
         } else {
-          reject(new Error(`ffmpeg exited with code ${code}`));
+          reject(new Error(`ffmpeg exited with code ${code}${ffmpegErrorDetail()}`));
         }
       });
 
@@ -195,8 +233,13 @@ export async function renderRouteToVideo(
       ffmpegProcess.kill("SIGKILL");
     }
 
-    if (browser) {
-      await browser.close();
+    // Close the page but keep the browser warm for the next job.
+    if (page) {
+      try {
+        await page.close();
+      } catch {
+        /* ignore */
+      }
     }
 
     await sleep(150);

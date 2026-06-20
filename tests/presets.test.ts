@@ -43,21 +43,28 @@ test("preset store rejects path traversal in get", async () => {
   await assert.rejects(() => store.get("preset:..%2f..%2fsecret"), /Invalid preset id/);
 });
 
-test("preset store sanitizes ids on save so they stay inside the presets dir", async () => {
+test("preset store rejects an explicit traversal id on save", async () => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "mapanim-presets-"));
   await fs.writeFile(path.join(rootDir, "routes.json"), JSON.stringify({ routes: [] }), "utf8");
   const store = createPresetStore({ rootDir });
 
-  const saved = await store.save({
-    route: {
-      id: "../../escape",
-      start: { label: "A", query: "A" },
-      end: { label: "B", query: "B" }
-    }
-  });
+  // An explicit, malformed route id is rejected rather than silently rewritten.
+  await assert.rejects(
+    () => store.save({ route: { id: "../../escape", start: { label: "A", query: "A" }, end: { label: "B", query: "B" } } }),
+    /Invalid preset id/
+  );
+});
 
-  // The slugified id must be a safe slug with no traversal characters.
-  assert.equal(saved.id, "preset:escape");
+test("preset store derives a safe slug id when none is supplied", async () => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "mapanim-presets-"));
+  await fs.writeFile(path.join(rootDir, "routes.json"), JSON.stringify({ routes: [] }), "utf8");
+  const store = createPresetStore({ rootDir });
+
+  // No id provided: it's derived from the name and slugified into a safe slug.
+  const saved = await store.save({
+    name: "City / Loop!!",
+    route: { start: { label: "A", query: "A" }, end: { label: "B", query: "B" } }
+  });
   assert.match(saved.id, /^preset:[a-z0-9-]+$/);
 
   // And nothing escaped the presets directory.

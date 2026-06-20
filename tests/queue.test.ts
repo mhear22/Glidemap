@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { createRenderQueue } from "../lib/render/queue.js";
 import type { RenderResult } from "../types/index.js";
 
@@ -63,4 +66,42 @@ test("drain cancels queued jobs and aborts the running job", async () => {
   const statuses = queue.list().map((job) => job.status);
   // The queued job is cancelled; the running job ends cancelled via abort.
   assert.ok(statuses.every((status) => status === "cancelled"));
+});
+
+const fakeResult = { outputPath: "", route: {} } as unknown as RenderResult;
+
+test("render queue reloads persisted jobs and fails interrupted running jobs", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "glidemap-queue-"));
+  const file = path.join(dir, "state.json");
+  fs.writeFileSync(
+    file,
+    JSON.stringify([
+      { id: "a", payload: { route: {} }, status: "running", stage: "capturing_frames", progress: null, createdAt: "t0", updatedAt: "t0" },
+      { id: "b", payload: { route: {} }, status: "completed", stage: "completed", progress: null, createdAt: "t0", updatedAt: "t0", result: { outputPath: "/out/x.mp4" } }
+    ])
+  );
+
+  const queue = createRenderQueue({ worker: async () => fakeResult, persistPath: file });
+  const jobs = queue.list();
+
+  assert.equal(jobs.length, 2);
+  const a = jobs.find((job) => job.id === "a");
+  assert.ok(a, "running job survives reload");
+  assert.equal(a.status, "failed");
+  assert.match(a.error ?? "", /restart/i);
+
+  const b = jobs.find((job) => job.id === "b");
+  assert.ok(b);
+  assert.equal(b.status, "completed");
+});
+
+test("render queue without a persistPath starts empty and ignores missing state", () => {
+  const queue = createRenderQueue({ worker: async () => fakeResult });
+  assert.equal(queue.list().length, 0);
+
+  const missing = createRenderQueue({
+    worker: async () => fakeResult,
+    persistPath: path.join(os.tmpdir(), "glidemap-missing-xyz-12345.json")
+  });
+  assert.equal(missing.list().length, 0);
 });

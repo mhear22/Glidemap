@@ -39,8 +39,8 @@ RUN npm test \
     && npm run build:renderer \
     && npm run build:webapp \
     && npm run build:admin \
+    && npm run build:server \
     && npm prune --omit=dev \
-    && npm install tsx \
     && npm cache clean --force
 
 ENV NODE_ENV=production
@@ -60,4 +60,6 @@ EXPOSE 5174
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
     CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.PORT||5173)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
 
-CMD ["node", "--import", "tsx", "server/index.ts"]
+# Run the precompiled server (built via `npm run build:server` above), so the
+# production image doesn't carry the tsx/TypeScript toolchain.
+CMD ["node", "dist/server/index.js"]

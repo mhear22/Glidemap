@@ -2,15 +2,15 @@ import fs from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import type { JobSummary, RenderJob, RenderProgress, RouteConfig, SerializedJob } from "../types/index.js";
 import type { PresetSaveRequest } from "../types/index.js";
 import { createPresetStore } from "../lib/presets/store.js";
 import { createProviderRegistry } from "../lib/providers/index.js";
 import { createRenderQueue } from "../lib/render/queue.js";
 import { createRenderAssetHandler, safeResolve } from "../lib/render/asset-handler.js";
-import { renderRouteToVideo } from "../lib/render/video.js";
+import { renderRouteToVideo, closeRenderBrowser } from "../lib/render/video.js";
 import { prepareRoute } from "../lib/routes.js";
+import { parseTrack } from "../lib/parse-track.js";
 import { createTileCache } from "../lib/tile-cache.js";
 import { createMetricsCollector } from "../lib/metrics.js";
 import { contentTypeFor, toError } from "../lib/utils.js";
@@ -33,9 +33,26 @@ interface FrontendHost {
   distDir: string;
 }
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const rootDir = path.resolve(__dirname, "..");
+/** An error carrying an HTTP status code so handlers can return 4xx instead of 500. */
+class HttpError extends Error {
+  readonly statusCode: number;
+  constructor(statusCode: number, message: string) {
+    super(message);
+    this.statusCode = statusCode;
+    this.name = "HttpError";
+  }
+}
+
+// GPX/KML uploads can be several MB, so the track-import endpoint accepts a
+// larger body than the small-JSON cap that lib/config applies to other routes.
+const IMPORT_TRACK_MAX_BYTES = Math.max(1, Number(process.env["MAX_BODY_MB"] ?? 8)) * 1024 * 1024;
+const MAX_QUEUE_DEPTH = Math.max(1, Number(process.env["MAX_QUEUE_DEPTH"] ?? 20));
+
+// Resolve assets/output relative to the working directory so the server works
+// both run-from-source (tsx) and precompiled (node dist/server/index.js).
+const rootDir = process.env["MAPANIM_ROOT"]
+  ? path.resolve(process.env["MAPANIM_ROOT"])
+  : process.cwd();
 const webDir = path.join(rootDir, "web");
 const webappDistDir = path.join(rootDir, "webapp", "dist");
 const adminappDistDir = path.join(rootDir, "adminapp", "dist");
@@ -204,7 +221,8 @@ const queue = createRenderQueue({
       providerRegistry,
       onProgress: emitProgress,
       signal
-    })
+    }),
+  persistPath: path.join(rootDir, ".queue-state.json")
 });
 
 queue.subscribe(() => {
@@ -280,115 +298,167 @@ function handleHealthEndpoints(request: http.IncomingMessage, response: http.Ser
   return false;
 }
 
+async function handleSearch(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
+  const requested = new URL(request.url ?? "/", requestOrigin(request));
+  const query = requested.searchParams.get("q")?.trim();
+  const providerName = requested.searchParams.get("provider") ?? providerRegistry.defaultProvider;
+
+  if (!query) {
+    sendJson(response, 200, { results: [] });
+    return;
+  }
+
+  if (query.length > SEARCH_QUERY_MAX_LENGTH) {
+    throw new HttpError(400, `Query must be at most ${SEARCH_QUERY_MAX_LENGTH} characters`);
+  }
+
+  if (!providerRegistry.listProviders().includes(providerName)) {
+    throw new HttpError(400, `Unknown provider "${providerName}"`);
+  }
+
+  const provider = providerRegistry.getProvider(providerName);
+  const results = await provider.search(query, { limit: 5 });
+  metricsCollector.recordSearch();
+  sendJson(response, 200, { results });
+}
+
+async function handlePreview(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
+  const body = await readJsonRecord(request, config.maxRequestBodyBytes);
+  const route = await prepareRoute(validateRouteConfig(body["route"] ?? body), { providerRegistry });
+  sendJson(response, 200, { route });
+}
+
+async function handleImportTrack(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
+  // GPX/KML payloads can be large, so this endpoint accepts a bigger body than
+  // the rest of the API.
+  const body = await readJsonRecord(request, IMPORT_TRACK_MAX_BYTES);
+  const text = parseOptionalString(body["text"]);
+  if (!text) {
+    throw new HttpError(400, "Provide GPX or KML text in the 'text' field");
+  }
+  let track: ReturnType<typeof parseTrack>;
+  try {
+    track = parseTrack(text);
+  } catch (error) {
+    throw new HttpError(400, toError(error).message);
+  }
+  sendJson(response, 200, { path: track });
+}
+
+async function handleListPresets(_request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
+  const presets = await presetStore.list();
+  sendJson(response, 200, { presets });
+}
+
+async function handleGetPreset(_request: http.IncomingMessage, response: http.ServerResponse, pathname: string): Promise<void> {
+  const id = decodeURIComponent(pathname.replace("/api/presets/", ""));
+  const preset = await presetStore.get(id);
+  sendJson(response, 200, preset);
+}
+
+async function handleSavePreset(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
+  const body = await readJsonRecord(request, config.maxRequestBodyBytes);
+  const route = validateRouteConfig(body["route"]);
+  const name = parseOptionalString(body["name"]);
+  const payload: PresetSaveRequest = name === undefined ? { route } : { name, route };
+  const saved = await presetStore.save(payload);
+  sendJson(response, 200, saved);
+}
+
+function handleListJobs(_request: http.IncomingMessage, response: http.ServerResponse): void {
+  sendJson(response, 200, { jobs: queue.list().map(serializeJob) });
+}
+
+async function handleEnqueue(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
+  const active = queue.list().filter((job) => job.status === "queued" || job.status === "running").length;
+  if (active >= MAX_QUEUE_DEPTH) {
+    throw new HttpError(429, "Render queue is full — wait for jobs to finish and try again.");
+  }
+  const body = await readJsonRecord(request, config.maxRequestBodyBytes);
+  const job = queue.enqueue({ route: validateRouteConfig(body["route"] ?? body) });
+  sendJson(response, 202, { job: serializeJob(job) });
+}
+
+function handleCancelJob(_request: http.IncomingMessage, response: http.ServerResponse, pathname: string): void {
+  const jobId = decodeURIComponent(pathname.replace("/api/render-jobs/", ""));
+  const cancelled = queue.cancel(jobId);
+  if (!cancelled) {
+    sendJson(response, 404, { error: "Job not found or not cancellable" });
+    return;
+  }
+  sendJson(response, 200, { cancelled: true });
+}
+
+async function handleMetrics(_request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
+  const metrics = await metricsCollector.getMetrics("24h");
+  sendJson(response, 200, metrics);
+}
+
+function handleEvents(request: http.IncomingMessage, response: http.ServerResponse): void {
+  response.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive"
+  });
+  response.write(`data: ${JSON.stringify({ jobs: queue.list().map(serializeJob) })}\n\n`);
+  sseClients.add(response);
+  // Clean up on either side ending: the client disconnecting (request close)
+  // or the response finishing/erroring (e.g. released during shutdown).
+  const cleanup = (): void => {
+    sseClients.delete(response);
+  };
+  request.on("close", cleanup);
+  response.on("close", cleanup);
+  response.on("error", cleanup);
+}
+
+type ApiRouteHandler = (
+  request: http.IncomingMessage,
+  response: http.ServerResponse,
+  pathname: string
+) => Promise<void> | void;
+
+interface ApiRoute {
+  method: string;
+  exact?: string;
+  prefix?: string;
+  handler: ApiRouteHandler;
+}
+
+const apiRoutes: ApiRoute[] = [
+  { method: "GET", exact: "/api/search", handler: handleSearch },
+  { method: "POST", exact: "/api/preview", handler: handlePreview },
+  { method: "POST", exact: "/api/import-track", handler: handleImportTrack },
+  { method: "GET", exact: "/api/presets", handler: handleListPresets },
+  { method: "POST", exact: "/api/presets", handler: handleSavePreset },
+  { method: "GET", prefix: "/api/presets/", handler: handleGetPreset },
+  { method: "GET", exact: "/api/render-jobs", handler: handleListJobs },
+  { method: "POST", exact: "/api/render-jobs", handler: handleEnqueue },
+  { method: "DELETE", prefix: "/api/render-jobs/", handler: handleCancelJob },
+  { method: "GET", exact: "/api/metrics", handler: handleMetrics },
+  { method: "GET", exact: "/api/render-events", handler: handleEvents }
+];
+
+function routeMatchesPath(route: ApiRoute, pathname: string): boolean {
+  return route.exact !== undefined ? route.exact === pathname : pathname.startsWith(route.prefix ?? "\0");
+}
+
 async function handleApi(request: http.IncomingMessage, response: http.ServerResponse, pathname: string): Promise<boolean> {
-  if (request.method === "GET" && pathname === "/api/search") {
-    const requested = new URL(request.url ?? "/", requestOrigin(request));
-    const query = requested.searchParams.get("q")?.trim();
-    const providerName = requested.searchParams.get("provider") ?? providerRegistry.defaultProvider;
+  const pathMatches = apiRoutes.filter((route) => routeMatchesPath(route, pathname));
+  if (pathMatches.length === 0) {
+    return false; // unknown API path — caller returns 404
+  }
 
-    if (!query) {
-      sendJson(response, 200, { results: [] });
-      return true;
-    }
-
-    if (query.length > SEARCH_QUERY_MAX_LENGTH) {
-      sendJson(response, 400, { error: `Query must be at most ${SEARCH_QUERY_MAX_LENGTH} characters` });
-      return true;
-    }
-
-    if (!providerRegistry.listProviders().includes(providerName)) {
-      sendJson(response, 400, { error: `Unknown provider "${providerName}"` });
-      return true;
-    }
-
-    const provider = providerRegistry.getProvider(providerName);
-    const results = await provider.search(query, { limit: 5 });
-    metricsCollector.recordSearch();
-    sendJson(response, 200, { results });
+  const route = pathMatches.find((candidate) => candidate.method === request.method);
+  if (!route) {
+    const allowed = [...new Set(pathMatches.map((match) => match.method))].join(", ");
+    response.setHeader("Allow", allowed);
+    sendJson(response, 405, { error: `Method not allowed; allowed: ${allowed}` });
     return true;
   }
 
-  if (request.method === "POST" && pathname === "/api/preview") {
-    const body = await readJsonRecord(request, config.maxRequestBodyBytes);
-    const route = await prepareRoute(validateRouteConfig(body["route"] ?? body), { providerRegistry });
-    sendJson(response, 200, { route });
-    return true;
-  }
-
-  if (request.method === "GET" && pathname === "/api/presets") {
-    const presets = await presetStore.list();
-    sendJson(response, 200, { presets });
-    return true;
-  }
-
-  if (request.method === "GET" && pathname.startsWith("/api/presets/")) {
-    const id = decodeURIComponent(pathname.replace("/api/presets/", ""));
-    const preset = await presetStore.get(id);
-    sendJson(response, 200, preset);
-    return true;
-  }
-
-  if (request.method === "POST" && pathname === "/api/presets") {
-    const body = await readJsonRecord(request, config.maxRequestBodyBytes);
-    const route = validateRouteConfig(body["route"]);
-    const name = parseOptionalString(body["name"]);
-    const payload: PresetSaveRequest = name === undefined ? { route } : { name, route };
-    const saved = await presetStore.save(payload);
-    sendJson(response, 200, saved);
-    return true;
-  }
-
-  if (request.method === "GET" && pathname === "/api/render-jobs") {
-    sendJson(response, 200, { jobs: queue.list().map(serializeJob) });
-    return true;
-  }
-
-  if (request.method === "POST" && pathname === "/api/render-jobs") {
-    const body = await readJsonRecord(request, config.maxRequestBodyBytes);
-    const job = queue.enqueue({
-      route: validateRouteConfig(body["route"] ?? body)
-    });
-    sendJson(response, 202, { job: serializeJob(job) });
-    return true;
-  }
-
-  if (request.method === "DELETE" && pathname.startsWith("/api/render-jobs/")) {
-    const jobId = decodeURIComponent(pathname.replace("/api/render-jobs/", ""));
-    const cancelled = queue.cancel(jobId);
-    if (!cancelled) {
-      sendJson(response, 404, { error: "Job not found or not cancellable" });
-      return true;
-    }
-    sendJson(response, 200, { cancelled: true });
-    return true;
-  }
-
-  if (request.method === "GET" && pathname === "/api/metrics") {
-    const metrics = await metricsCollector.getMetrics("24h");
-    sendJson(response, 200, metrics);
-    return true;
-  }
-
-  if (request.method === "GET" && pathname === "/api/render-events") {
-    response.writeHead(200, {
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive"
-    });
-    response.write(`data: ${JSON.stringify({ jobs: queue.list().map(serializeJob) })}\n\n`);
-    sseClients.add(response);
-    // Clean up on either side ending: the client disconnecting (request close)
-    // or the response finishing/erroring (e.g. released during shutdown).
-    const cleanup = (): void => {
-      sseClients.delete(response);
-    };
-    request.on("close", cleanup);
-    response.on("close", cleanup);
-    response.on("error", cleanup);
-    return true;
-  }
-
-  return false;
+  await route.handler(request, response, pathname);
+  return true;
 }
 
 async function serveFile(response: http.ServerResponse, filePath: string): Promise<void> {
@@ -581,7 +651,7 @@ async function handleRequest(
 
     await serveFrontendAsset(response, frontend, pathname);
   } catch (error) {
-    const resolvedError = toError(error);
+    const resolvedError = error instanceof HttpError ? error : toError(error);
     if (!response.headersSent) {
       sendError(response, resolvedError, requestLogger);
       return;
@@ -630,6 +700,7 @@ async function listen(server: http.Server, host: string, port: number): Promise<
 
 async function startFrontendListener(frontend: FrontendHost, host: string, port: number, setRenderBaseUrl: boolean): Promise<void> {
   const server = createListener(frontend);
+  servers.push(server);
   const resolvedPort = await listen(server, host, port);
 
   if (setRenderBaseUrl) {
@@ -641,12 +712,56 @@ async function startFrontendListener(frontend: FrontendHost, host: string, port:
 
 async function startBackendOnlyListener(host: string, port: number): Promise<void> {
   const server = createListener(null);
+  servers.push(server);
   const resolvedPort = await listen(server, host, port);
   renderOrigin = resolvePublicOrigin(host, resolvedPort);
   logListener("api", host, resolvedPort);
 }
 
 let shutdownPromise: Promise<void> | null = null;
+let retentionTimer: ReturnType<typeof setInterval> | undefined;
+
+// Retention sweep so output/ and the tile cache can't fill the disk over time.
+async function pruneOutputs(): Promise<void> {
+  const dir = path.join(rootDir, "output");
+  const maxAgeMs = Math.max(0, Number(process.env["OUTPUT_MAX_AGE_DAYS"] ?? 14)) * 86_400_000;
+  const maxFiles = Math.max(1, Number(process.env["OUTPUT_MAX_FILES"] ?? 200));
+  try {
+    const names = await fs.readdir(dir);
+    const stated = await Promise.all(names.map(async (name) => {
+      try {
+        const stat = await fs.stat(path.join(dir, name));
+        return stat.isFile() ? { name, mtime: stat.mtimeMs } : null;
+      } catch {
+        return null;
+      }
+    }));
+    const files = stated
+      .filter((entry): entry is { name: string; mtime: number } => entry !== null)
+      .sort((a, b) => b.mtime - a.mtime);
+    const now = Date.now();
+    const stale = files.filter((f, i) => i >= maxFiles || (maxAgeMs > 0 && now - f.mtime > maxAgeMs));
+    for (const f of stale) {
+      try {
+        await fs.unlink(path.join(dir, f.name));
+      } catch {
+        /* ignore */
+      }
+    }
+  } catch {
+    /* output dir may not exist yet */
+  }
+}
+
+function startRetentionSweeps(): void {
+  void pruneOutputs();
+  void tileCache.pruneNow();
+  retentionTimer = setInterval(() => {
+    void pruneOutputs();
+    void tileCache.pruneNow();
+  }, 30 * 60_000);
+  retentionTimer.unref();
+}
 
 function shutdown(signal: string, exitCode = 0): Promise<void> {
   if (shutdownPromise) {
@@ -675,6 +790,12 @@ function shutdown(signal: string, exitCode = 0): Promise<void> {
     }
     sseClients.clear();
 
+    // Close the warm Chromium reused across render jobs, plus the periodic
+    // timers and counters, so nothing keeps the process or a browser alive.
+    await closeRenderBrowser();
+    if (retentionTimer) {
+      clearInterval(retentionTimer);
+    }
     metricsCollector.stop();
     apiLimiter.stop();
     searchLimiter.stop();
@@ -711,6 +832,7 @@ function registerProcessHandlers(): void {
 
 async function main(): Promise<void> {
   registerProcessHandlers();
+  startRetentionSweeps();
 
   if (!config.serveUi) {
     await startBackendOnlyListener(config.host, config.apiPort);

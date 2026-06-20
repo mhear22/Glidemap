@@ -47,6 +47,7 @@ export interface RouteConfig {
   height?: number;
   fps?: number;
   durationSeconds?: number;
+  format?: "mp4" | "webm";
   overviewPadding?: number;
   output?: string;
   start?: LocationSpec;

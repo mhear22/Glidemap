@@ -1,8 +1,22 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref, watch } from "vue";
-import maplibregl from "maplibre-gl";
+import type { Map as MlMap, Marker as MlMarker, StyleSpecification } from "maplibre-gl";
 import type { ProviderSearchResult } from "../types.js";
 import { ensureTileCacheReady } from "../tile-cache.js";
+
+// maplibre-gl (~1 MB) only matters when this picker opens, so load it (and its
+// CSS) lazily on first open instead of in the initial app bundle.
+let ml: typeof import("maplibre-gl") | null = null;
+async function loadMaplibre(): Promise<typeof import("maplibre-gl")> {
+  if (!ml) {
+    const [mod] = await Promise.all([
+      import("maplibre-gl"),
+      import("maplibre-gl/dist/maplibre-gl.css")
+    ]);
+    ml = mod;
+  }
+  return ml;
+}
 
 const props = withDefaults(defineProps<{
   open: boolean;
@@ -24,10 +38,10 @@ const mapContainer = ref<HTMLDivElement | null>(null);
 const searchInput = ref<HTMLInputElement | null>(null);
 const highlightedId = ref<string | null>(null);
 
-let map: maplibregl.Map | null = null;
-let markers: maplibregl.Marker[] = [];
+let map: MlMap | null = null;
+let markers: MlMarker[] = [];
 
-const standardStyle: maplibregl.StyleSpecification = {
+const standardStyle: StyleSpecification = {
   version: 8,
   sources: {
     carto: {
@@ -59,7 +73,7 @@ function createMarkerElement(result: ProviderSearchResult, index: number): HTMLD
 }
 
 function syncMarkers(): void {
-  if (!map) return;
+  if (!map || !ml) return;
 
   for (const marker of markers) {
     marker.remove();
@@ -72,7 +86,7 @@ function syncMarkers(): void {
     const result = props.results[i];
     if (!result) continue;
     const el = createMarkerElement(result, i);
-    const marker = new maplibregl.Marker({ element: el })
+    const marker = new ml.Marker({ element: el })
       .setLngLat(result.coords)
       .addTo(map);
     markers.push(marker);
@@ -82,7 +96,7 @@ function syncMarkers(): void {
   if (onlyResult) {
     map.flyTo({ center: onlyResult.coords, zoom: 12, duration: 600 });
   } else {
-    const bounds = new maplibregl.LngLatBounds();
+    const bounds = new ml.LngLatBounds();
     for (const result of props.results) {
       bounds.extend(result.coords);
     }
@@ -92,9 +106,10 @@ function syncMarkers(): void {
 
 async function initMap(): Promise<void> {
   if (!mapContainer.value) return;
+  const lib = await loadMaplibre();
   await ensureTileCacheReady();
 
-  map = new maplibregl.Map({
+  map = new lib.Map({
     container: mapContainer.value,
     style: standardStyle,
     center: [0, 20],
