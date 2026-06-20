@@ -374,6 +374,13 @@ let startSearchTimer: ReturnType<typeof setTimeout> | undefined;
 let endSearchTimer: ReturnType<typeof setTimeout> | undefined;
 let previewTimer: ReturnType<typeof setTimeout> | undefined;
 let pollTimer: ReturnType<typeof setInterval> | undefined;
+
+// Debounce windows for the calls that hit the upstream geocoder/router. The OSM
+// usage policy is ~1 request/second, so we wait out a deliberate typing pause
+// before searching, and wait longer before a preview (which geocodes both
+// endpoints and routes between them — up to three upstream calls).
+const SEARCH_DEBOUNCE_MS = 600;
+const PREVIEW_DEBOUNCE_MS = 800;
 const baseTitle = document.title;
 
 const previewReady = computed<boolean>(() => Boolean(route.start.query.trim() && route.end.query.trim()));
@@ -530,7 +537,7 @@ async function loadPreset(id: string): Promise<void> {
     applyRoute(payload.route);
     presetName.value = payload.name ?? payload.route.name ?? "";
     previewProgress.value = 0;
-    schedulePreview(0);
+    schedulePreview();
     loadModalOpen.value = false;
   } catch (error) {
     notify(`Could not load preset: ${errorMessage(error)}`, "error");
@@ -581,7 +588,7 @@ function confirmReset(): void {
 function applySearchResult(kind: "start" | "end", result: ProviderSearchResult): void {
   route[kind] = { label: result.label, query: result.query, coords: result.coords };
   setSearchResults(kind, []);
-  schedulePreview(0);
+  schedulePreview();
 }
 
 function openSearchModal(kind: SearchKind): void {
@@ -605,7 +612,7 @@ function onSearchModalSelect(result: ProviderSearchResult): void {
 function updateLocationQuery(kind: "start" | "end", query: string): void {
   route[kind] = { ...route[kind], label: "", query, coords: null };
   if (!query.trim()) setSearchResults(kind, []);
-  schedulePreview(0);
+  schedulePreview();
 }
 
 function scheduleSearch(kind: "start" | "end", query: string): void {
@@ -626,7 +633,7 @@ function scheduleSearch(kind: "start" | "end", query: string): void {
     } finally {
       setSearchLoading(kind, false);
     }
-  }, 260);
+  }, SEARCH_DEBOUNCE_MS);
   if (kind === "start") startSearchTimer = handle;
   else endSearchTimer = handle;
 }
@@ -634,7 +641,7 @@ function scheduleSearch(kind: "start" | "end", query: string): void {
 let previewAbort: AbortController | null = null;
 let previewRequestVersion = 0;
 
-function schedulePreview(delayMs: number = 320): void {
+function schedulePreview(delayMs: number = PREVIEW_DEBOUNCE_MS): void {
   window.clearTimeout(previewTimer);
   previewTimer = window.setTimeout(async () => {
     previewAbort?.abort();

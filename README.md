@@ -80,7 +80,11 @@ response, minting a fresh one when the caller doesn't supply a valid one.
 Operational endpoints bypass rate limiting and auth so orchestrators and Prometheus scrapers
 are never throttled or blocked; protect `/metrics` at the network layer if it must stay private.
 Request validation rejects out-of-range render parameters (dimensions, fps, duration, zoom,
-coordinates) with `400` before a job is queued.
+coordinates) with `400` before a job is queued. When the upstream map provider fails, the
+error is classified rather than surfaced as an opaque `500`: a provider rate-limit becomes a
+retryable `503` with a `Retry-After` header and a clear message, and a provider outage becomes
+a `502`. The UI debounces search and preview (which call the upstream geocoder/router) so a
+burst of typing can't trip the provider's rate limit.
 
 Responses carry a baseline set of security headers (CSP tuned for MapLibre, `X-Content-Type-Options`,
 `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`) and rate-limit headers

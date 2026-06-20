@@ -442,8 +442,10 @@ function statusForError(error: Error): number {
 
 function sendError(response: http.ServerResponse, error: Error, log: Logger): void {
   const status = statusForError(error);
-  // Don't leak internal failure details to clients in production; log them fully.
-  const clientMessage = status >= 500 && config.isProduction ? "Internal server error" : error.message;
+  // Errors may opt to expose their message even on a 5xx (e.g. an upstream
+  // outage), so users get an actionable reason instead of "Internal server error".
+  const expose = (error as { expose?: unknown }).expose === true;
+  const clientMessage = status >= 500 && config.isProduction && !expose ? "Internal server error" : error.message;
 
   if (status >= 500) {
     log.error("request failed", { err: error, status });
@@ -456,6 +458,11 @@ function sendError(response: http.ServerResponse, error: Error, log: Logger): vo
   // still hold unread bytes, so close it rather than risk a corrupt keep-alive.
   if (status === 413) {
     headers["Connection"] = "close";
+  }
+  // A retryable upstream failure advertises how long to back off.
+  const retryAfter = (error as { retryAfterSeconds?: unknown }).retryAfterSeconds;
+  if (typeof retryAfter === "number" && Number.isFinite(retryAfter)) {
+    headers["Retry-After"] = String(retryAfter);
   }
   response.writeHead(status, headers);
   response.end(JSON.stringify({ error: clientMessage }));

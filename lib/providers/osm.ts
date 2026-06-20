@@ -6,6 +6,39 @@ import type { Provider, ProviderSearchResult, RoutedPath } from "../../types/ind
 const USER_AGENT = "MapAnim/0.2 (local webapp)";
 const execFileAsync = promisify(execFile);
 
+/**
+ * An upstream map-data provider (geocoding/routing) failed. Carries an HTTP
+ * status for the API layer to surface and `expose: true` so the friendly message
+ * reaches the client even in production (where opaque 5xx messages are hidden).
+ * A 429 from upstream becomes a retryable 503 so the UI can tell the user to wait,
+ * rather than showing a confusing "Internal server error".
+ */
+export class UpstreamError extends Error {
+  readonly statusCode: number;
+  readonly expose = true;
+  readonly retryAfterSeconds?: number;
+
+  constructor(message: string, statusCode: number, options?: { retryAfterSeconds?: number; cause?: unknown }) {
+    super(message, options?.cause !== undefined ? { cause: options.cause } : undefined);
+    this.name = "UpstreamError";
+    this.statusCode = statusCode;
+    if (options?.retryAfterSeconds !== undefined) {
+      this.retryAfterSeconds = options.retryAfterSeconds;
+    }
+  }
+}
+
+export function classifyUpstreamError(upstreamStatus: number | null, cause: unknown): UpstreamError {
+  if (upstreamStatus === 429) {
+    return new UpstreamError(
+      "The map data provider is rate-limiting requests right now. Please wait a few seconds and try again.",
+      503,
+      { retryAfterSeconds: 5, cause }
+    );
+  }
+  return new UpstreamError("The map data provider is temporarily unavailable. Please try again shortly.", 502, { cause });
+}
+
 interface NominatimResult {
   place_id?: number;
   display_name: string;
@@ -42,6 +75,9 @@ async function requestJsonViaCurl<T = unknown>(url: URL): Promise<T> {
 
 async function requestJson<T = unknown>(url: URL, { retries = 3 }: { retries?: number } = {}): Promise<T> {
   let lastError: Error = new Error("Unknown error");
+  // Track the most recent upstream HTTP status so the final thrown error can be
+  // classified (a 429 is retryable; anything else is treated as unavailable).
+  let lastStatus: number | null = null;
 
   for (let attempt = 0; attempt < retries; attempt += 1) {
     try {
@@ -53,6 +89,7 @@ async function requestJson<T = unknown>(url: URL, { retries = 3 }: { retries?: n
       });
 
       if (!response.ok) {
+        lastStatus = response.status;
         throw new Error(`Request failed with status ${response.status}`);
       }
 
@@ -64,6 +101,12 @@ async function requestJson<T = unknown>(url: URL, { retries = 3 }: { retries?: n
         return await requestJsonViaCurl<T>(url);
       } catch (curlError) {
         lastError = toError(curlError);
+        // curl surfaces an HTTP status in its message (e.g. "error: 429"); recover
+        // it so a rate-limit is still classified correctly when fetch was blocked.
+        const curlStatus = /returned error: (\d{3})/.exec(lastError.message)?.[1];
+        if (curlStatus) {
+          lastStatus = Number(curlStatus);
+        }
       }
 
       if (attempt < retries - 1) {
@@ -72,7 +115,7 @@ async function requestJson<T = unknown>(url: URL, { retries = 3 }: { retries?: n
     }
   }
 
-  throw lastError;
+  throw classifyUpstreamError(lastStatus, lastError);
 }
 
 export function createOsmProvider(
