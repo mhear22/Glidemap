@@ -14,7 +14,10 @@ export interface SecurityHeaderOptions {
 
 const BASELINE_HEADERS: Readonly<Record<string, string>> = Object.freeze({
   "X-Content-Type-Options": "nosniff",
-  "X-Frame-Options": "DENY",
+  // SAMEORIGIN (not DENY): the studio embeds its own same-origin /render/ surface
+  // in an iframe for the live preview. SAMEORIGIN still blocks cross-origin
+  // clickjacking while permitting that first-party frame.
+  "X-Frame-Options": "SAMEORIGIN",
   "Referrer-Policy": "no-referrer",
   "Cross-Origin-Opener-Policy": "same-origin",
   "X-DNS-Prefetch-Control": "off",
@@ -36,7 +39,9 @@ const CSP_DIRECTIVES: Readonly<Record<string, string>> = Object.freeze({
   "connect-src": "'self' https:",
   "font-src": "'self' data:",
   "object-src": "'none'",
-  "frame-ancestors": "'none'",
+  // 'self' (not 'none'): the live preview frames the same-origin /render/ surface.
+  // This still prevents any cross-origin page from framing the app.
+  "frame-ancestors": "'self'",
   "form-action": "'self'"
 });
 

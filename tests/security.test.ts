@@ -5,9 +5,16 @@ import { securityHeaders } from "../lib/http/security.js";
 test("securityHeaders includes baseline hardening headers", () => {
   const headers = securityHeaders();
   assert.equal(headers["X-Content-Type-Options"], "nosniff");
-  assert.equal(headers["X-Frame-Options"], "DENY");
+  // SAMEORIGIN so the same-origin /render/ preview iframe can load, while still
+  // blocking cross-origin clickjacking.
+  assert.equal(headers["X-Frame-Options"], "SAMEORIGIN");
   assert.equal(headers["Referrer-Policy"], "no-referrer");
   assert.ok(headers["Permissions-Policy"]);
+});
+
+test("securityHeaders allows same-origin framing for the preview iframe", () => {
+  const csp = securityHeaders()["Content-Security-Policy"];
+  assert.match(csp!, /frame-ancestors 'self'/);
 });
 
 test("securityHeaders emits a MapLibre-compatible CSP by default", () => {

@@ -89,7 +89,7 @@ test("server health, readiness, security headers and 404s", async () => {
 
     // Security headers and request id on every response.
     assert.equal(health.headers.get("x-content-type-options"), "nosniff");
-    assert.equal(health.headers.get("x-frame-options"), "DENY");
+    assert.equal(health.headers.get("x-frame-options"), "SAMEORIGIN");
     assert.ok(health.headers.get("content-security-policy"));
     assert.ok(health.headers.get("x-request-id"));
 
