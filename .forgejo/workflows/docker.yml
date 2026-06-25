@@ -30,6 +30,11 @@ concurrency:
 
 env:
   IMAGE_NAME: glidemap
+  # Registry host as the HOST docker engine sees it. With Docker-out-of-Docker
+  # the build/push run on the host daemon, so this must be the externally
+  # routable name — NOT the internal GITHUB_SERVER_URL (http://forgejo:3000),
+  # which only resolves inside the runner's compose network.
+  REGISTRY: forgejo.mikahear.es:3001
 
 jobs:
   docker:
@@ -47,17 +52,13 @@ jobs:
           fi
           docker version
 
-      # Registry host = the Forgejo instance host (strip the scheme off the
-      # server URL); image path = <host>/<owner>/glidemap, lowercased.
-      - name: Resolve registry + image name
+      # Image path = <registry>/<owner>/glidemap, owner lowercased.
+      - name: Resolve image name
         id: image
         run: |
-          host="${GITHUB_SERVER_URL#http://}"
-          host="${host#https://}"
-          host="${host%%/*}"
           owner="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
-          echo "registry=$host" >> "$GITHUB_OUTPUT"
-          echo "image=$host/$owner/${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "registry=${REGISTRY}" >> "$GITHUB_OUTPUT"
+          echo "image=${REGISTRY}/$owner/${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Log in to the registry
         run: |
