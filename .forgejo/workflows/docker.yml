@@ -8,6 +8,17 @@ name: Docker
 # <instance-host>/<owner>/glidemap. Auth uses the token Forgejo injects into
 # every Actions run (secrets.GITHUB_TOKEN), which already has package write
 # scope for the repository owner — no extra secret to configure.
+#
+# RUNNER REQUIREMENTS:
+#   * The job needs access to a Docker daemon. The runner must mount the host
+#     socket into the job (e.g. config.yaml `container.valid_volumes` +
+#     `/var/run/docker.sock:/var/run/docker.sock`, or DOCKER_HOST).
+#   * The instance registry is served over plain HTTP, so the host daemon must
+#     list it as insecure — /etc/docker/daemon.json:
+#       { "insecure-registries": ["forgejo.mikahear.es:3001"] }
+#     then restart the daemon. (Plain `docker push` honours this; that's why
+#     this workflow uses the docker CLI directly instead of buildx, whose
+#     buildkit builder would need its own insecure-registry config.)
 on:
   push:
     branches: [main]
@@ -26,6 +37,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The default job image (node:20-bookworm) has no docker client. Install
+      # one if it's missing, then confirm we can reach the mounted daemon.
+      - name: Ensure docker CLI + daemon reachable
+        run: |
+          if ! command -v docker >/dev/null 2>&1; then
+            apt-get update
+            apt-get install -y --no-install-recommends docker.io ca-certificates
+          fi
+          docker version
+
       # Registry host = the Forgejo instance host (strip the scheme off the
       # server URL); image path = <host>/<owner>/glidemap, lowercased.
       - name: Resolve registry + image name
@@ -38,25 +59,23 @@ jobs:
           echo "registry=$host" >> "$GITHUB_OUTPUT"
           echo "image=$host/$owner/${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/setup-buildx-action@v3
+      - name: Log in to the registry
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | docker login "${{ steps.image.outputs.registry }}" \
+                -u "${{ github.actor }}" --password-stdin
 
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ steps.image.outputs.registry }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ steps.image.outputs.image }}:sha-${{ github.sha }}
-            ${{ steps.image.outputs.image }}:latest
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-          # Registry-backed cache so the ~1.5GB node+Chromium deps layer stays a
-          # hit across runs when package*.json is unchanged.
-          cache-from: type=registry,ref=${{ steps.image.outputs.image }}:buildcache
-          cache-to: type=registry,ref=${{ steps.image.outputs.image }}:buildcache,mode=max
+      # Plain build + push. The host daemon's layer cache persists across runs,
+      # so the heavy node+Chromium deps layer is reused when package*.json is
+      # unchanged — no registry-backed buildx cache needed.
+      - name: Build and push
+        run: |
+          IMAGE="${{ steps.image.outputs.image }}"
+          docker build \
+            -t "$IMAGE:sha-${{ github.sha }}" \
+            -t "$IMAGE:latest" \
+            --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+            --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            .
+          docker push "$IMAGE:sha-${{ github.sha }}"
+          docker push "$IMAGE:latest"
