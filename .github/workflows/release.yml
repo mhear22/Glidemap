@@ -84,7 +84,7 @@ jobs:
 
       # The Dockerfile runs the test suite and builds all three frontends,
       # so a passing image build is also the CI gate.
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           push: true
